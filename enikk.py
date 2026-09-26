@@ -14,7 +14,7 @@ import tempfile
 import threading
 from datetime import datetime, timezone
 
-VERSION = '2.0.0'
+VERSION = '2.0.1'
 ANSI = re.compile(r'\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]')
 HELP = '''codex_enikk — 하나의 대화 계속 이어가기
 
@@ -23,7 +23,7 @@ HELP = '''codex_enikk — 하나의 대화 계속 이어가기
   codex_enikk --help    도움말
   codex_enikk --version 버전
 
-처음에는 현재 Codex 세션 또는 현재 폴더의 최근 대화를 연결합니다.
+처음에는 현재 Codex 세션, 현재 폴더, 전체 대화 순으로 기존 대화를 찾습니다.
 이후 폴더나 최근 세션이 바뀌어도 연결한 대화만 이어갑니다.
 새 대화·포크·세션 선택은 지원하지 않습니다. Ctrl+D로 종료합니다.
 백업: ~/git/codex-enikk-session-backups/
@@ -218,7 +218,9 @@ def pinned_session():
     if not candidates:
         candidates = [(p, m) for p, m in sessions if m.get('cwd') == str(Path.cwd())]
     if not candidates:
-        raise ValueError('이어갈 기존 대화가 없습니다. 기존 작업 폴더에서 실행하거나 백업을 복구해주세요.')
+        candidates = sessions
+    if not candidates:
+        raise ValueError('저장된 기존 대화가 없습니다. 백업을 복구해주세요. 새 대화는 만들지 않습니다.')
     _, meta = max(candidates, key=lambda item: item[0].stat().st_mtime_ns)
     session_id = meta['id']
     if not isinstance(session_id, str) or not re.fullmatch(r'[a-zA-Z0-9_-]+', session_id):

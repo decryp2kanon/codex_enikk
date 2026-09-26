@@ -94,6 +94,24 @@ class EnikkTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.base / 'args.json').exists())
 
+    def test_first_launch_finds_latest_session_outside_cwd(self):
+        older = self.write_session(self.sessions / 'old.jsonl', cwd=self.base / 'old-project')
+        newer = self.write_session(self.sessions / 'new.jsonl', cwd=self.base / 'new-project')
+        newer.write_text(newer.read_text().replace('example-session', 'latest-session'))
+        os.utime(older, ns=(100, 100))
+        os.utime(newer, ns=(200, 200))
+        with patch('pathlib.Path.cwd', return_value=self.base / 'empty-folder'):
+            self.assertEqual(enikk.pinned_session(), 'latest-session')
+
+    def test_current_project_precedes_global_latest(self):
+        local = self.write_session(cwd=self.base)
+        other = self.write_session(self.sessions / 'other.jsonl', cwd=self.base / 'other')
+        other.write_text(other.read_text().replace('example-session', 'other-session'))
+        os.utime(local, ns=(100, 100))
+        os.utime(other, ns=(200, 200))
+        with patch('pathlib.Path.cwd', return_value=self.base):
+            self.assertEqual(enikk.pinned_session(), 'example-session')
+
     def test_pin_survives_newer_session_and_cwd_change(self):
         self.write_session()
         with patch('pathlib.Path.cwd', return_value=self.base):
@@ -234,7 +252,7 @@ class EnikkTests(unittest.TestCase):
                 for name in ('codex_enikk', 'codex_session_save.sh'):
                     result = subprocess.run([str(prefix / 'bin' / name), '--version'], env=env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(result.stdout.strip(), 'codex_enikk 2.0.0')
+                    self.assertEqual(result.stdout.strip(), 'codex_enikk 2.0.1')
                 result = subprocess.run([str(prefix / 'bin/codex_enikk_restore'), '--help'], env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 # A command replaced by the user must survive uninstall.
