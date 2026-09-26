@@ -106,7 +106,7 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads((self.base / 'args.json').read_text()), ['resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox'])
         self.assertEqual(len(list((self.base / 'backups').glob('*.tar.gz'))), 2)
-        self.assertIn('hello', (self.base / 'logs/codex-session-example-session.txt').read_text())
+        self.assertIn('hello', (self.base / 'logs/codex-session-example-session-part-000001.txt').read_text())
 
     def test_resume_alias_and_exit_code(self):
         result = self.run_cli('--resume', status=7)
@@ -137,7 +137,7 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
         prompt = '/model\n/new\n/resume\nmultiline text\n'
         result = self.run_cli(prompt=prompt)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(prompt, (self.base / 'logs/codex-session-example-session.txt').read_text())
+        self.assertIn(prompt, (self.base / 'logs/codex-session-example-session-part-000001.txt').read_text())
         self.assertIn('native reply', result.stdout)
         self.assertNotIn('나 >', result.stdout)
 
@@ -358,6 +358,69 @@ print('native terminal')
         session.write_text(json.dumps({'type': 'response_item', 'payload': {'type': 'message', 'role': 'assistant', 'content': [{'type': 'output_text', 'text': 'fallback'}]}}))
         self.assertIn('fallback', enikk.transcript(session))
 
+    def test_transcript_parts_respect_real_10mb_limit(self):
+        text = 'a' * enikk.TRANSCRIPT_PART_BYTES + '한글🙂' * 10
+        output = self.base / 'parts'
+        parts = enikk.write_transcript_parts(output, 'test', text)
+        self.assertEqual(len(parts), 2)
+        self.assertEqual(parts[0].stat().st_size, 10_000_000)
+        self.assertTrue(all(p.stat().st_size <= 10_000_000 for p in parts))
+        self.assertEqual(''.join(p.read_text() for p in parts), text)
+        self.assertTrue(all(p.stat().st_mode & 0o777 == 0o600 for p in parts))
+
+    def test_transcript_parts_preserve_unicode_and_completed_parts(self):
+        output = self.base / 'parts'
+        text = '가나다🙂abc\n' * 12
+        parts = enikk.write_transcript_parts(output, 'test', text, limit=31)
+        self.assertGreater(len(parts), 2)
+        self.assertTrue(all(p.stat().st_size <= 31 for p in parts))
+        self.assertEqual(''.join(p.read_text() for p in parts), text)
+        original = parts[0].stat()
+        parts = enikk.write_transcript_parts(output, 'test', text + '추가 대화🙂', limit=31)
+        self.assertEqual(parts[0].stat().st_mtime_ns, original.st_mtime_ns)
+        self.assertEqual(parts[0].stat().st_ino, original.st_ino)
+        self.assertEqual(''.join(p.read_text() for p in parts), text + '추가 대화🙂')
+
+    def test_transcript_restart_partial_line_and_legacy_preservation(self):
+        session = self.write_session()
+        output = self.base / 'logs'
+        output.mkdir()
+        legacy = output / 'codex-session-example-session.txt'
+        legacy.write_text('legacy conversation')
+        baseline = {}
+        enikk.export_changed(baseline, self.base, output, 'example-session')
+        part = output / 'codex-session-example-session-part-000001.txt'
+        original = part.stat().st_mtime_ns
+        enikk.export_changed({}, self.base, output, 'example-session')
+        self.assertEqual(part.stat().st_mtime_ns, original)
+        event = json.dumps({'type': 'event_msg', 'payload': {'type': 'agent_message', 'message': 'new answer'}})
+        with session.open('a') as out:
+            out.write(event[:-1])
+        enikk.export_changed(baseline, self.base, output, 'example-session')
+        self.assertNotIn('new answer', part.read_text())
+        with session.open('a') as out:
+            out.write('}\n')
+        enikk.export_changed(baseline, self.base, output, 'example-session')
+        self.assertIn('new answer', part.read_text())
+        self.assertEqual(legacy.read_text(), 'legacy conversation')
+
+    def test_shortened_source_archives_surplus_parts(self):
+        output = self.base / 'parts'
+        previous = enikk.write_transcript_parts(output, 'test', 'x' * 100, limit=31)
+        old_tail = previous[-1].read_bytes()
+        parts = enikk.write_transcript_parts(output, 'test', 'short', limit=31)
+        self.assertEqual(len(list(output.glob('*.txt'))), 1)
+        self.assertEqual(parts[0].read_text(), 'short')
+        self.assertEqual(next(output.glob('superseded-*/' + previous[-1].name)).read_bytes(), old_tail)
+
+    def test_live_saver_once_exports_existing_session(self):
+        self.write_session()
+        result = subprocess.run([sys.executable, str(ROOT / 'save_transcript.py'),
+                                 '--session', 'example-session', '--once'],
+                                env=self.env, cwd=self.base, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('계속 해줘', (self.base / 'logs/codex-session-example-session-part-000001.txt').read_text())
+
     def test_exports_only_matching_cwd(self):
         self.write_session(cwd=self.base / 'other-project')
         output = self.base / 'logs'
@@ -365,7 +428,7 @@ print('native terminal')
         self.assertFalse(output.exists())
         self.write_session(cwd=self.base)
         enikk.export_changed({}, self.base, output)
-        self.assertTrue((output / 'codex-session-example-session.txt').exists())
+        self.assertTrue((output / 'codex-session-example-session-part-000001.txt').exists())
 
     def test_backup_symlink_rejected(self):
         private = self.base / 'secret.jsonl'
@@ -385,7 +448,7 @@ print('native terminal')
                 for name in ('codex_enikk', 'codex_session_save.sh'):
                     result = subprocess.run([str(prefix / 'bin' / name), '--version'], env=env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(result.stdout.strip(), 'codex_enikk 2.1.1')
+                    self.assertEqual(result.stdout.strip(), 'codex_enikk 2.1.2')
                 result = subprocess.run([str(prefix / 'bin/codex_enikk_restore'), '--help'], env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 # A command replaced by the user must survive uninstall.
@@ -414,7 +477,7 @@ print('native terminal')
         original = session.read_bytes()
         result = subprocess.run(['bash', str(ROOT / 'update.sh')], env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('codex_enikk 2.1.1', result.stdout)
+        self.assertIn('codex_enikk 2.1.2', result.stdout)
         previous = list(lib.glob('previous-*'))
         self.assertEqual(len(previous), 1)
         self.assertEqual((previous[0] / 'enikk.py').read_text(), 'print("old version")\n')

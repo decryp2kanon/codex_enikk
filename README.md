@@ -1,6 +1,6 @@
 # codex_enikk
 
-**2.1.1 · Linux · Python 3.10+ · MIT**
+**2.1.2 · Linux · Python 3.10+ · MIT**
 
 기존 대화를 **원래 Codex 대화형 화면(TUI)**으로 여는 실행기입니다.
 Codex의 입력창, 사진 첨부, Markdown 표시, `/model`, 승인 화면 등 기본 기능을 그대로 사용합니다.
@@ -84,8 +84,27 @@ Codex 자체는 수정하지 않습니다.
 - `$CODEX_HOME`(기본 `~/.codex`)의 `sessions/`, `archived_sessions/` 아래 JSONL,
   `history.jsonl`, `session_index.jsonl`, `enikk-continuity.json`을 저장합니다.
 - 연결된 세션의 사용자·어시스턴트 텍스트를 약 2초마다 `transcripts/`에 저장합니다.
+- TXT는 파일당 최대 **10 MB (10,000,000바이트)**로 분할합니다.
+  파일명은 `codex-session-세션ID-part-000001.txt`, `...-000002.txt` 순서입니다.
+  번호순으로 이어 붙이면 전체 텍스트가 되며 한글·이모지의 UTF-8 경계는 보존합니다.
+- 이미 완성된 동일 내용의 분할 파일은 다시 쓰지 않습니다. 예전 단일 TXT 파일은 보존하며,
+  새 저장기는 그 파일을 갱신하지 않습니다. 원문이 짧아지면 남는 분할 파일은 `superseded-*`에 보존합니다.
+- 원본 JSONL 및 `.tar.gz` 백업은 분할 대상이 아닙니다.
 - 폴더 권한은 700, 아카이브·대화문·연결 기록은 600입니다.
 - 시작 백업이 실패하면 대화를 시작하지 않습니다. 종료 저장 실패도 오류로 알립니다.
+
+실행 중인 앱을 재시작하지 않고 현재 세션을 저장하려면 소스 폴더에서 별도 터미널로 실행할 수 있습니다:
+
+```bash
+python3 save_transcript.py --session SESSION_ID
+# 한 번만 저장:
+python3 save_transcript.py --session SESSION_ID --once
+```
+
+이 저장기는 원본 세션을 읽기만 하고 Codex를 실행하거나 세션을 전환하지 않습니다.
+새 TXT는 완료된 메시지를 약 2초 간격으로 반영합니다. Ctrl+C로 저장기를 종료할 수 있습니다.
+기존 앱이 구버전으로 실행 중이면 그 앱의 단일 TXT 저장도 종료 전까지 계속될 수 있습니다.
+지속적인 기본 적용은 `sudo bash ./update.sh` 후 앱을 다시 실행하세요.
 
 Codex와 앱을 종료한 뒤 누락된 파일을 복구하세요:
 

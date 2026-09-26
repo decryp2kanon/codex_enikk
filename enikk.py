@@ -17,7 +17,8 @@ import tempfile
 import threading
 from datetime import datetime, timezone
 
-VERSION = '2.1.1'
+VERSION = '2.1.2'
+TRANSCRIPT_PART_BYTES = 10_000_000
 INSTANCE_SOCKET_PREFIX = '\0codex_enikk.instance.'
 ANSI = re.compile(r'\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]')
 HELP = '''codex_enikk — 기존 대화를 원래 Codex 화면으로 이어가기
@@ -176,6 +177,45 @@ def transcript(path):
     return '\n\n'.join(f'[{role}]\n{ANSI.sub("", str(body))}' for role, body in (events or responses) if body) + '\n'
 
 
+def write_transcript_parts(output, safe_id, text, limit=TRANSCRIPT_PART_BYTES):
+    """Atomically update numbered UTF-8 files, each at most 10 MB by default."""
+    if limit < 4:
+        raise ValueError('TXT 분할 크기는 최소 4바이트여야 합니다.')
+    private_dir(output)
+    data = text.encode('utf-8')
+    start = 0
+    index = 1
+    active = set()
+    while start < len(data) or index == 1:
+        end = min(start + limit, len(data))
+        # Move a boundary back to the start of a multibyte character.
+        while end < len(data) and data[end] & 0xC0 == 0x80:
+            end -= 1
+        chunk = data[start:end]
+        destination = output / f'codex-session-{safe_id}-part-{index:06d}.txt'
+        active.add(destination)
+        if destination.is_symlink():
+            raise OSError(f'대화문 경로가 심볼릭 링크입니다: {destination}')
+        if not destination.exists() or destination.read_bytes() != chunk:
+            fd, temporary = tempfile.mkstemp(prefix='.transcript-', dir=output)
+            try:
+                with os.fdopen(fd, 'wb') as stream:
+                    stream.write(chunk)
+                os.replace(temporary, destination)
+            finally:
+                Path(temporary).unlink(missing_ok=True)
+        start = end
+        index += 1
+    # If the source was shortened, retain old trailing parts outside the active set.
+    stale = [p for p in output.glob(f'codex-session-{safe_id}-part-*.txt') if p not in active]
+    if stale:
+        archive = output / ('superseded-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ'))
+        private_dir(archive)
+        for path in stale:
+            path.rename(archive / path.name)
+    return sorted(active)
+
+
 def export_changed(baseline, cwd, output, session_id=None):
     for path in (codex_home() / 'sessions').rglob('*.jsonl'):
         if path.is_symlink() or not path.resolve().is_relative_to(codex_home()):
@@ -188,13 +228,12 @@ def export_changed(baseline, cwd, output, session_id=None):
             continue
         private_dir(output)
         safe_id = re.sub(r'[^a-zA-Z0-9_-]', '_', str(meta.get('id') or path.stem))
-        fd, temporary = tempfile.mkstemp(prefix='.transcript-', dir=output)
-        try:
-            with os.fdopen(fd, 'w', encoding='utf-8') as stream:
-                stream.write(transcript(path))
-            os.replace(temporary, output / f'codex-session-{safe_id}.txt')
-        finally:
-            Path(temporary).unlink(missing_ok=True)
+        # Serialise the built-in watcher and an optional live saver for this session.
+        lock_path = output / f'.codex-session-{safe_id}.lock'
+        fd = os.open(lock_path, os.O_CREAT | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, 'w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            write_transcript_parts(output, safe_id, transcript(path))
         baseline[str(path)] = (stat.st_mtime_ns, stat.st_size)
 
 
