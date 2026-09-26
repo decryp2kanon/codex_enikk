@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Local Codex continuity wrapper. Python standard library only."""
 import io
+import fcntl
 import json
 import os
 from pathlib import Path
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import tarfile
@@ -14,20 +14,21 @@ import tempfile
 import threading
 from datetime import datetime, timezone
 
-VERSION = '1.0.0'
+VERSION = '2.0.0'
 ANSI = re.compile(r'\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]')
-HELP = '''codex_enikk — Codex 세션 이어가기
+HELP = '''codex_enikk — 하나의 대화 계속 이어가기
 
-  codex_enikk                    마지막 세션 재개 (현재 작업 폴더 기준)
-  codex_enikk --resume           기존 세션 선택
-  codex_enikk --resume ID        지정 세션 재개
-  codex_enikk --help             이 도움말
-  codex_enikk --version          버전
+  codex_enikk           고정된 대화 이어가기
+  codex_enikk --resume  같은 동작 (호환 옵션)
+  codex_enikk --help    도움말
+  codex_enikk --version 버전
 
-추가 옵션은 codex resume에 전달합니다. --new는 지원하지 않습니다.
-백업: ~/git/codex-enikk-session-backups/ (시작 전 / 종료 후)
-복구: codex_enikk_restore BACKUP.tar.gz
+처음에는 현재 Codex 세션 또는 현재 폴더의 최근 대화를 연결합니다.
+이후 폴더나 최근 세션이 바뀌어도 연결한 대화만 이어갑니다.
+새 대화·포크·세션 선택은 지원하지 않습니다. Ctrl+D로 종료합니다.
+백업: ~/git/codex-enikk-session-backups/
 '''
+
 
 
 def codex_home():
@@ -42,7 +43,9 @@ def records(path):
     with path.open(encoding='utf-8', errors='replace') as stream:
         for line in stream:
             try:
-                yield json.loads(line)
+                record = json.loads(line)
+                if isinstance(record, dict):
+                    yield record
             except (ValueError, TypeError):
                 continue  # A running Codex process may still be writing the last line.
 
@@ -69,7 +72,7 @@ def backup():
                 raise OSError(f'심볼릭 링크 세션 폴더는 백업할 수 없습니다: {root}')
             if root.exists():
                 paths.extend(root.rglob('*.jsonl'))
-        paths.extend(source / name for name in ('history.jsonl', 'session_index.jsonl'))
+        paths.extend(source / name for name in ('history.jsonl', 'session_index.jsonl', 'enikk-continuity.json'))
         manifest = {'version': VERSION, 'created_utc': stamp, 'files': [],
                     'scope': 'session JSONL and history; not a filesystem snapshot'}
         with os.fdopen(fd, 'wb') as raw, tarfile.open(fileobj=raw, mode='w:gz') as archive:
@@ -108,7 +111,7 @@ def restore(archive_path):
             if item.name == 'manifest.json' and item.isfile():
                 continue
             parts = Path(item.name).parts
-            allowed = (len(parts) == 2 and parts[1] in ('history.jsonl', 'session_index.jsonl')) or (
+            allowed = (len(parts) == 2 and parts[1] in ('history.jsonl', 'session_index.jsonl', 'enikk-continuity.json')) or (
                 len(parts) >= 3 and parts[1] in ('sessions', 'archived_sessions') and item.name.endswith('.jsonl'))
             if not item.isfile() or not parts or parts[0] != 'codex' or '..' in parts or not allowed:
                 raise ValueError(f'허용되지 않은 백업 항목: {item.name}')
@@ -165,7 +168,7 @@ def transcript(path):
     return '\n\n'.join(f'[{role}]\n{ANSI.sub("", str(body))}' for role, body in (events or responses) if body) + '\n'
 
 
-def export_changed(baseline, cwd, output):
+def export_changed(baseline, cwd, output, session_id=None):
     for path in (codex_home() / 'sessions').rglob('*.jsonl'):
         if path.is_symlink() or not path.resolve().is_relative_to(codex_home()):
             continue
@@ -173,7 +176,7 @@ def export_changed(baseline, cwd, output):
         if baseline.get(str(path)) == (stat.st_mtime_ns, stat.st_size):
             continue
         meta = next((r.get('payload', {}) for r in records(path) if r.get('type') == 'session_meta'), {})
-        if meta.get('cwd') != str(cwd):
+        if (session_id and meta.get('id') != session_id) or (not session_id and meta.get('cwd') != str(cwd)):
             continue
         private_dir(output)
         safe_id = re.sub(r'[^a-zA-Z0-9_-]', '_', str(meta.get('id') or path.stem))
@@ -187,71 +190,168 @@ def export_changed(baseline, cwd, output):
         baseline[str(path)] = (stat.st_mtime_ns, stat.st_size)
 
 
+def session_metadata():
+    for path in (codex_home() / 'sessions').rglob('*.jsonl'):
+        if path.is_symlink() or not path.resolve().is_relative_to(codex_home()):
+            continue
+        meta = next((r.get('payload', {}) for r in records(path) if r.get('type') == 'session_meta'), {})
+        if meta.get('id'):
+            yield path, meta
+
+
+def pinned_session():
+    state = codex_home() / 'enikk-continuity.json'
+    sessions = list(session_metadata())
+    if state.exists():
+        if state.is_symlink():
+            raise ValueError('연속성 기록이 심볼릭 링크입니다. 중단합니다.')
+        data = json.loads(state.read_text())
+        if not isinstance(data, dict):
+            raise ValueError('연속성 기록이 손상되었습니다. 백업을 복구해주세요.')
+        session_id = data.get('session_id')
+        match = next(((p, m) for p, m in sessions if m['id'] == session_id), None)
+        if not match:
+            raise ValueError('연결된 대화가 없습니다. 백업을 복구해주세요. 다른 대화로 전환하지 않습니다.')
+        return session_id
+    active = os.environ.get('CODEX_THREAD_ID')
+    candidates = [(p, m) for p, m in sessions if m['id'] == active] if active else []
+    if not candidates:
+        candidates = [(p, m) for p, m in sessions if m.get('cwd') == str(Path.cwd())]
+    if not candidates:
+        raise ValueError('이어갈 기존 대화가 없습니다. 기존 작업 폴더에서 실행하거나 백업을 복구해주세요.')
+    _, meta = max(candidates, key=lambda item: item[0].stat().st_mtime_ns)
+    session_id = meta['id']
+    if not isinstance(session_id, str) or not re.fullmatch(r'[a-zA-Z0-9_-]+', session_id):
+        raise ValueError('올바르지 않은 세션 ID입니다.')
+    fd, temporary = tempfile.mkstemp(prefix='.enikk-state-', dir=codex_home())
+    try:
+        with os.fdopen(fd, 'w') as out:
+            json.dump({'session_id': session_id, 'version': 1}, out)
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(temporary, state)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    return session_id
+
+
+def conversation(session_id):
+    """Own input loop: never expose Codex TUI session-switching commands."""
+    print('연결된 대화를 이어갑니다. 한 줄씩 입력하세요. 종료: Ctrl+D', flush=True)
+    while True:
+        try:
+            prompt = input('나 > ')
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        if not prompt.strip():
+            continue
+        if prompt.lstrip().startswith('/'):
+            print('슬래시 명령은 지원하지 않습니다. 연결된 대화만 이어갑니다.', flush=True)
+            continue
+        # Check on every turn; never fall back to --last or a new session.
+        if pinned_session() != session_id:
+            raise ValueError('연결된 대화가 변경되어 중단합니다.')
+        command = ['codex', 'exec', 'resume', session_id, '--json', '--skip-git-repo-check', '-']
+        child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        identified = completed = failed = False
+        try:
+            child.stdin.write(prompt + '\n')
+            child.stdin.close()
+            for line in child.stdout:
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+                if event.get('type') == 'thread.started':
+                    if event.get('thread_id') != session_id:
+                        child.terminate()
+                        raise ValueError('Codex가 다른 대화를 반환하여 중단합니다.')
+                    identified = True
+                if event.get('type') == 'turn.completed':
+                    completed = True
+                if event.get('type') == 'item.completed':
+                    item = event.get('item', {})
+                    if item.get('type') == 'agent_message':
+                        print('에닉 > ' + item.get('text', ''), flush=True)
+                if event.get('type') in ('error', 'turn.failed'):
+                    failed = True
+                    print(f'Codex 오류: {event}', file=sys.stderr)
+            status = child.wait()
+        except BaseException:
+            if child.poll() is None:
+                child.terminate()
+            try:
+                child.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait()
+            raise
+        finally:
+            child.stdout.close()
+            if not child.stdin.closed:
+                child.stdin.close()
+        if status:
+            return status if status > 0 else 128 - status
+        if not identified or not completed or failed:
+            raise ValueError('같은 대화의 응답 완료를 확인하지 못했습니다. 대화를 전환하지 않고 중단합니다.')
+        backup()
+
+
 def main(args=None):
     args = list(sys.argv[1:] if args is None else args)
-    if args == ['--help'] or args == ['-h']:
+    if args in (['--help'], ['-h']):
         print(HELP)
         return 0
     if args == ['--version']:
         print(f'codex_enikk {VERSION}')
         return 0
-    if '--new' in args:
-        print('--new는 지원하지 않습니다. 기존 세션은 그대로 유지됩니다.', file=sys.stderr)
+    if args not in ([], ['--resume']):
+        print('하나의 대화만 이어갑니다. 새 세션·포크·세션 변경·추가 옵션은 지원하지 않습니다.', file=sys.stderr)
         return 2
-    explicit = bool(args and args[0] == '--resume')
-    if explicit:
-        args.pop(0)
-    command = ['codex', 'resume'] + ([] if explicit else ['--last']) + args
     if shutil.which('codex') is None:
         print('codex CLI를 먼저 설치해주세요.', file=sys.stderr)
         return 127
-    try:
+    private_dir(codex_home())
+    # Keep one process per Codex home, including first-time session binding.
+    with (codex_home() / 'enikk-continuity.lock').open('a') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ValueError('이미 이 대화를 이어가는 앱이 실행 중입니다.')
+        session_id = pinned_session()
         backup()
-    except (OSError, ValueError) as exc:
-        print(f'시작 전 백업 실패: {exc}', file=sys.stderr)
-        return 1
-    cwd = Path.cwd()
-    output = Path(os.environ.get('CODEX_ENIKK_LOG_DIR', str(backup_dir() / 'transcripts'))).expanduser()
-    baseline = {str(p): (p.stat().st_mtime_ns, p.stat().st_size)
-                for p in (codex_home() / 'sessions').rglob('*.jsonl') if p.is_file()}
-    stop = threading.Event()
-    def watcher():
-        while not stop.wait(2):
-            try:
-                export_changed(baseline, cwd, output)
-            except (OSError, ValueError) as exc:
-                print(f'대화문 저장 경고: {exc}', file=sys.stderr)
-    thread = threading.Thread(target=watcher, daemon=True)
-    thread.start()
-    status = 1
-    child = None
-    previous = {}
-    def forward(signum, frame):
-        if child is not None and child.poll() is None:
-            child.send_signal(signum)
-    try:
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            previous[sig] = signal.signal(sig, forward)
-        child = subprocess.Popen(command)
-        status = child.wait()
-    finally:
-        stop.set()
-        thread.join()
-        for sig, handler in previous.items():
-            signal.signal(sig, handler)
-        for operation in (lambda: export_changed(baseline, cwd, output), backup):
-            try:
-                operation()
-            except (OSError, ValueError) as exc:
-                print(f'종료 시 저장 실패: {exc}. 원본 세션은 CODEX_HOME에 남아 있습니다.', file=sys.stderr)
-                if status == 0:
-                    status = 1
-    return status if status >= 0 else 128 - status
+        cwd = Path.cwd()
+        output = Path(os.environ.get('CODEX_ENIKK_LOG_DIR', str(backup_dir() / 'transcripts'))).expanduser()
+        baseline = {}
+        stop = threading.Event()
+        def watcher():
+            while not stop.wait(2):
+                try:
+                    export_changed(baseline, cwd, output, session_id)
+                except (OSError, ValueError) as exc:
+                    print(f'대화문 저장 경고: {exc}', file=sys.stderr)
+        thread = threading.Thread(target=watcher, daemon=True)
+        thread.start()
+        status = 1
+        try:
+            status = conversation(session_id)
+        finally:
+            stop.set()
+            thread.join()
+            for operation in (lambda: export_changed(baseline, cwd, output, session_id), backup):
+                try:
+                    operation()
+                except (OSError, ValueError) as exc:
+                    print(f'종료 시 저장 실패: {exc}. 원본 세션은 CODEX_HOME에 남아 있습니다.', file=sys.stderr)
+                    if status == 0:
+                        status = 1
+        return status
 
 
 if __name__ == '__main__':
     try:
         sys.exit(main())
-    except (OSError, ValueError, tarfile.TarError) as error:
+    except (OSError, ValueError, tarfile.TarError, KeyboardInterrupt) as error:
         print(f'codex_enikk: {error}', file=sys.stderr)
         sys.exit(1)

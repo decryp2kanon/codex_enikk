@@ -28,6 +28,7 @@ class EnikkTests(unittest.TestCase):
         self.env.update(HOME=str(self.home), CODEX_HOME=str(self.data),
                         CODEX_ENIKK_BACKUP_DIR=str(self.base / 'backups'),
                         CODEX_ENIKK_LOG_DIR=str(self.base / 'logs'))
+        self.env.pop('CODEX_THREAD_ID', None)
         self.patcher = patch.dict(os.environ, self.env, clear=True)
         self.patcher.start()
         self.addCleanup(self.patcher.stop)
@@ -45,35 +46,90 @@ class EnikkTests(unittest.TestCase):
         path.write_text('\n'.join(json.dumps(x) for x in data) + '\n', encoding='utf-8')
         return path
 
-    def run_cli(self, *args, status=0):
+    def run_cli(self, *args, status=0, prompt="hello\n", seed=True, wrong_thread=False, incomplete=False):
+        if seed and not list(self.sessions.glob("*.jsonl")):
+            self.write_session()
         fakebin = self.base / 'bin'
         fakebin.mkdir(exist_ok=True)
         fake = fakebin / 'codex'
         fake.write_text('#!/usr/bin/env python3\nimport os,sys,json\nfrom pathlib import Path\n'
                         'Path(os.environ["ARG_CAPTURE"]).write_text(json.dumps(sys.argv[1:]))\n'
-                        'p=Path(os.environ["CODEX_HOME"])/"sessions"/"new.jsonl"\n'
-                        'p.write_text(json.dumps({"type":"session_meta","payload":{"id":"fake-id","cwd":os.getcwd()}})+"\\n"+'
-                        'json.dumps({"type":"event_msg","payload":{"type":"user_message","message":"hello"}})+"\\n")\n'
+                        'prompt=sys.stdin.read()\n'
+                        'p=Path(os.environ["CODEX_HOME"])/"sessions"/"rollout-example.jsonl"\n'
+                        'with p.open("a") as out: out.write(json.dumps({"type":"event_msg","payload":{"type":"user_message","message":prompt}})+"\\n")\n'
+                        'print(json.dumps({"type":"thread.started","thread_id":("wrong-id" if os.environ["WRONG_THREAD"] == "1" else sys.argv[3])}))\n'
+                        'print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":"reply"}}))\n'
+                        'if os.environ["INCOMPLETE"] != "1": print(json.dumps({"type":"turn.completed"}))\n'
                         'sys.exit(int(os.environ["FAKE_STATUS"]))\n')
         fake.chmod(0o755)
         env = self.env | {'PATH': str(fakebin) + os.pathsep + os.environ['PATH'],
-                          'ARG_CAPTURE': str(self.base / 'args.json'), 'FAKE_STATUS': str(status)}
-        return subprocess.run([str(ROOT / 'codex_enikk'), *args], cwd=self.base, env=env, capture_output=True, text=True)
+                          'ARG_CAPTURE': str(self.base / 'args.json'), 'FAKE_STATUS': str(status), 'WRONG_THREAD': str(int(wrong_thread)), 'INCOMPLETE': str(int(incomplete))}
+        return subprocess.run([str(ROOT / 'codex_enikk'), *args], cwd=self.base, env=env, input=prompt, capture_output=True, text=True)
 
     def test_default_resume_backup_and_log(self):
         result = self.run_cli()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads((self.base / 'args.json').read_text()), ['resume', '--last'])
-        self.assertEqual(len(list((self.base / 'backups').glob('*.tar.gz'))), 2)
-        self.assertIn('hello', (self.base / 'logs/codex-session-fake-id.txt').read_text())
+        self.assertEqual(json.loads((self.base / 'args.json').read_text()), ['exec', 'resume', 'example-session', '--json', '--skip-git-repo-check', '-'])
+        self.assertEqual(len(list((self.base / 'backups').glob('*.tar.gz'))), 3)
+        self.assertIn('hello', (self.base / 'logs/codex-session-example-session.txt').read_text())
 
-    def test_explicit_resume_and_exit_code(self):
-        for args, expected in [(['--resume'], ['resume']), (['--resume', 'sample-id'], ['resume', 'sample-id']),
-                               (['--model', 'example-model'], ['resume', '--last', '--model', 'example-model'])]:
-            with self.subTest(args=args):
-                result = self.run_cli(*args, status=7)
-                self.assertEqual(result.returncode, 7, result.stderr)
-                self.assertEqual(json.loads((self.base / 'args.json').read_text()), expected)
+    def test_resume_alias_and_exit_code(self):
+        result = self.run_cli('--resume', status=7)
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertEqual(json.loads((self.base / 'args.json').read_text()), ['exec', 'resume', 'example-session', '--json', '--skip-git-repo-check', '-'])
+
+    def test_session_switching_options_rejected(self):
+        for args in [('--fork',), ('fork',), ('--resume', 'different-id'), ('--last',), ('--ephemeral',), ('--', '--fork')]:
+            result = self.run_cli(*args)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertFalse((self.base / 'args.json').exists())
+
+    def test_no_session_does_not_create_one(self):
+        result = self.run_cli(seed=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertFalse((self.base / 'args.json').exists())
+
+    def test_slash_commands_never_reach_codex(self):
+        result = self.run_cli(prompt='/fork\n/new\n/resume\n')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.base / 'args.json').exists())
+
+    def test_pin_survives_newer_session_and_cwd_change(self):
+        self.write_session()
+        with patch('pathlib.Path.cwd', return_value=self.base):
+            self.assertEqual(enikk.pinned_session(), 'example-session')
+        newer = self.write_session(self.sessions / 'newer.jsonl', cwd=self.base)
+        newer.write_text(newer.read_text().replace('example-session', 'other-id'))
+        with patch('pathlib.Path.cwd', return_value=self.base / 'elsewhere'):
+            self.assertEqual(enikk.pinned_session(), 'example-session')
+        (self.sessions / 'rollout-example.jsonl').unlink()
+        with self.assertRaises(ValueError):
+            enikk.pinned_session()
+
+    def test_process_lock_prevents_parallel_conversations(self):
+        import fcntl
+        with (self.data / 'enikk-continuity.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = self.run_cli()
+            self.assertEqual(result.returncode, 1)
+            self.assertFalse((self.base / 'args.json').exists())
+
+    def test_wrong_thread_or_incomplete_turn_stops(self):
+        for settings in ({'wrong_thread': True}, {'incomplete': True}):
+            result = self.run_cli(**settings)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertEqual(json.loads((self.data / 'enikk-continuity.json').read_text())['session_id'], 'example-session')
+
+    def test_pin_is_backed_up_and_restored(self):
+        self.write_session()
+        with patch('pathlib.Path.cwd', return_value=self.base):
+            enikk.pinned_session()
+        target = enikk.backup()
+        state = self.data / 'enikk-continuity.json'
+        state.unlink()
+        enikk.restore(target)
+        self.assertEqual(enikk.pinned_session(), 'example-session')
+        self.assertEqual(state.stat().st_mode & 0o777, 0o600)
 
     def test_new_rejected_without_launch(self):
         result = self.run_cli('--new')
@@ -91,8 +147,8 @@ class EnikkTests(unittest.TestCase):
         (self.base / 'logs').write_text('not a directory')
         result = self.run_cli()
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(len(list((self.base / 'backups').glob('*.tar.gz'))), 2)
-        self.assertTrue((self.sessions / 'new.jsonl').exists())
+        self.assertEqual(len(list((self.base / 'backups').glob('*.tar.gz'))), 3)
+        self.assertTrue((self.sessions / 'rollout-example.jsonl').exists())
 
     def test_archive_contents_permissions_and_exact_bytes(self):
         session = self.write_session()
@@ -178,7 +234,7 @@ class EnikkTests(unittest.TestCase):
                 for name in ('codex_enikk', 'codex_session_save.sh'):
                     result = subprocess.run([str(prefix / 'bin' / name), '--version'], env=env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(result.stdout.strip(), 'codex_enikk 1.0.0')
+                    self.assertEqual(result.stdout.strip(), 'codex_enikk 2.0.0')
                 result = subprocess.run([str(prefix / 'bin/codex_enikk_restore'), '--help'], env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 # A command replaced by the user must survive uninstall.
