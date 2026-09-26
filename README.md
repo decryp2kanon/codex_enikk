@@ -81,7 +81,7 @@ Codex 자체는 수정하지 않습니다.
 
 ## 백업과 복구
 
-전용 저장 위치: **`~/.local/share/codex_enikk/`**
+전용 저장 위치: **`/var/tmp/codex_enikk-사용자UID/`**
 
 - 백업은 `backups/`, 10 MB 분할 대화문은 `transcripts/`, Dorothy 전달용 파일은
   `latest/`에 저장합니다. 현재 작업 폴더와 Git 저장소 안에는 만들지 않습니다.
@@ -131,7 +131,7 @@ CODEX_HOME="$HOME/codex-recovered" codex_enikk_restore /path/to/backup.tar.gz
 | 환경변수 | 기본값 |
 | --- | --- |
 | `CODEX_HOME` | `~/.codex` |
-| `CODEX_ENIKK_DATA_DIR` | `~/.local/share/codex_enikk` |
+| `CODEX_ENIKK_DATA_DIR` | `/var/tmp/codex_enikk-사용자UID` |
 
 저장 위치는 절대 경로이며 Git 저장소 밖이어야 합니다. 해당 폴더 권한을 700으로 변경합니다.
 `CODEX_HOME`을 바꾸면 별도의 연결 기록을 사용합니다.
@@ -144,7 +144,7 @@ CODEX_HOME="$HOME/codex-recovered" codex_enikk_restore /path/to/backup.tar.gz
 
 ## Dorothy 전달용 최신 대화
 
-`~/.local/share/codex_enikk/latest/codex-latest-YYMMDD-HHMMSS.txt`를 실행마다 하나씩 만들고, 현재 연결된 세션에서
+`/var/tmp/codex_enikk-사용자UID/latest/codex-latest-YYMMDD-HHMMSS.txt`를 실행마다 하나씩 만들고, 현재 연결된 세션에서
 약 2초마다 같은 파일을 갱신합니다. 파일명은 최초 저장 시각(시스템 현지 시간)입니다.
 이전 실행의 파일은 보존합니다.
 사용자·Codex 진행·최종 메시지만 로컬 JSONL에서 읽습니다. TTY, resume 및 전체 10MB archive는 변경하지 않습니다.

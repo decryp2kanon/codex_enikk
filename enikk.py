@@ -39,7 +39,7 @@ HELP = '''codex_enikk — 기존 대화를 원래 Codex 화면으로 이어가�
 Codex 자체 입력창, 이미지 붙여넣기, /model 등 슬래시 명령을 그대로 사용합니다.
 추가 인수는 codex resume에 전달합니다. 옵션 설명: codex resume --help
 시작 시 연결된 세션 ID를 사용하며, TUI 안의 세션 전환 명령은 차단하지 않습니다.
-저장 위치: ~/.local/share/codex_enikk/
+저장 위치: /var/tmp/codex_enikk-사용자UID/
 '''
 
 
@@ -50,7 +50,7 @@ def codex_home():
 
 def data_dir():
     configured = Path(os.environ.get(
-        'CODEX_ENIKK_DATA_DIR', str(Path.home() / '.local/share/codex_enikk'))).expanduser()
+        'CODEX_ENIKK_DATA_DIR', f'/var/tmp/codex_enikk-{os.getuid()}')).expanduser()
     if not configured.is_absolute():
         raise ValueError('CODEX_ENIKK_DATA_DIR는 절대 경로여야 합니다.')
     path = configured.resolve()
