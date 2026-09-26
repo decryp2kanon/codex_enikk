@@ -1,6 +1,6 @@
 # codex_enikk
 
-**2.1.6 · Linux · Python 3.10+ · MIT**
+**2.1.7 · Linux · Python 3.10+ · MIT**
 
 기존 대화를 **원래 Codex 대화형 화면(TUI)**으로 여는 실행기입니다.
 Codex의 입력창, 사진 첨부, Markdown 표시, `/model`, 승인 화면 등 기본 기능을 그대로 사용합니다.
@@ -78,6 +78,10 @@ SIGKILL·전원 차단처럼 정리 코드를 실행할 수 없는 종료는 예
 내부 명령은 `codex resume SESSION_ID [추가 옵션]`입니다.
 별도의 한 줄 입력 루프나 비대화형 JSON 출력 변환을 사용하지 않습니다.
 Codex 자체는 수정하지 않습니다.
+
+실행 시 `~/.codex/AGENTS.md`의 짧은 관리 블록에 Enikk의 이름과 유래를 기록합니다.
+Codex가 지원하는 전역 지침 로딩을 사용하므로 새 세션과 모델 변경 후에도 적용되며,
+transcript에 identity를 복제하거나 별도의 LLM 호출을 하지 않습니다. 기존 전역 지침은 보존합니다.
 
 ## 백업과 복구
 

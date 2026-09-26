@@ -112,6 +112,20 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
         self.assertEqual(json.loads((self.base / 'args.json').read_text()), ['resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox', '--no-daemon'])
         self.assertEqual(len(list((self.enikk_data / 'backups').glob('*.tar.gz'))), 2)
         self.assertIn('hello', (self.enikk_data / 'transcripts/codex-session-example-session-part-000001.txt').read_text())
+        self.assertIn('Name: Enikk (에닉), exactly E-N-I-K-K.', (self.data / 'AGENTS.md').read_text())
+
+    def test_identity_is_short_idempotent_and_preserves_global_instructions(self):
+        agents = self.data / 'AGENTS.md'
+        agents.write_text('# Existing\nKeep this.\n')
+        first = enikk.ensure_identity()
+        original = first.read_bytes()
+        self.assertIn('# Existing\nKeep this.', first.read_text())
+        self.assertIn('Goddess of Victory: NIKKE', first.read_text())
+        self.assertIn('never Anik, Enik, EnikkK', first.read_text())
+        self.assertLess(len(enikk.IDENTITY.encode()), 400)
+        self.assertEqual(enikk.ensure_identity(), first)
+        self.assertEqual(first.read_bytes(), original)
+        self.assertEqual(first.stat().st_mode & 0o777, 0o600)
 
     def test_resume_alias_and_exit_code(self):
         result = self.run_cli('--resume', status=7)
@@ -568,7 +582,7 @@ while True: time.sleep(1)
                 for name in ('codex_enikk', 'codex_session_save.sh'):
                     result = subprocess.run([str(prefix / 'bin' / name), '--version'], env=env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(result.stdout.strip(), 'codex_enikk 2.1.6')
+                    self.assertEqual(result.stdout.strip(), 'codex_enikk 2.1.7')
                 result = subprocess.run([str(prefix / 'bin/codex_enikk_restore'), '--help'], env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 # A command replaced by the user must survive uninstall.
@@ -597,7 +611,7 @@ while True: time.sleep(1)
         original = session.read_bytes()
         result = subprocess.run(['bash', str(ROOT / 'update.sh')], env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('codex_enikk 2.1.6', result.stdout)
+        self.assertIn('codex_enikk 2.1.7', result.stdout)
         previous = list(lib.glob('previous-*'))
         self.assertEqual(len(previous), 1)
         self.assertEqual((previous[0] / 'enikk.py').read_text(), 'print("old version")\n')
