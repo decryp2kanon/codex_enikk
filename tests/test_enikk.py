@@ -3,6 +3,8 @@ import json
 import os
 import shutil
 import socket
+import signal
+import time
 import uuid
 from pathlib import Path
 import subprocess
@@ -104,21 +106,21 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
     def test_default_resume_backup_and_log(self):
         result = self.run_cli()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads((self.base / 'args.json').read_text()), ['resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox'])
+        self.assertEqual(json.loads((self.base / 'args.json').read_text()), ['resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox', '--no-daemon'])
         self.assertEqual(len(list((self.base / 'backups').glob('*.tar.gz'))), 2)
         self.assertIn('hello', (self.base / 'logs/codex-session-example-session-part-000001.txt').read_text())
 
     def test_resume_alias_and_exit_code(self):
         result = self.run_cli('--resume', status=7)
         self.assertEqual(result.returncode, 7, result.stderr)
-        self.assertEqual(json.loads((self.base / 'args.json').read_text()), ['resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox'])
+        self.assertEqual(json.loads((self.base / 'args.json').read_text()), ['resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox', '--no-daemon'])
 
     def test_native_options_forwarded(self):
         args = ('--resume', '--yolo', '-m', 'chosen-model', '-i', '/tmp/photo with spaces.png', '--no-alt-screen')
         result = self.run_cli(*args)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads((self.base / 'args.json').read_text()),
-                         ['resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox',
+                         ['resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox', '--no-daemon',
                           '-m', 'chosen-model', '-i', '/tmp/photo with spaces.png', '--no-alt-screen'])
 
     def test_yolo_aliases_do_not_duplicate_flag_or_rewrite_literal_prompt(self):
@@ -126,7 +128,7 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
         result = self.run_cli('--yolo', flag, '--', '--yolo')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads((self.base / 'args.json').read_text()),
-                         ['resume', 'example-session', flag, '--', '--yolo'])
+                         ['resume', 'example-session', flag, '--no-daemon', '--', '--yolo'])
 
     def test_no_session_does_not_create_one(self):
         result = self.run_cli(seed=False)
@@ -226,14 +228,13 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
         self.assertEqual(self.run_cli().returncode, 0)
 
     @unittest.skipUnless(SOCKET_BIND_AVAILABLE, 'sandbox denies abstract socket bind')
-    def test_child_holds_instance_lock_after_parent_guard_closes(self):
+    def test_child_does_not_hold_instance_lock_after_parent_guard_closes(self):
         with enikk.single_instance() as guard:
             child = subprocess.Popen([sys.executable, '-c', 'import sys; sys.stdin.read()'],
-                                     stdin=subprocess.PIPE, pass_fds=(guard.fileno(),))
+                                     stdin=subprocess.PIPE, close_fds=True)
         try:
-            with self.assertRaises(ValueError):
-                with enikk.single_instance():
-                    pass
+            with enikk.single_instance():
+                pass
         finally:
             child.communicate(input=b'', timeout=5)
         with enikk.single_instance():
@@ -244,7 +245,7 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
             launch.return_value.wait.return_value = 0
             self.assertEqual(enikk.conversation('example-session', 42, ['-i', 'picture.png']), 0)
             launch.assert_called_once_with(
-                ['codex', 'resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox', '-i', 'picture.png'], pass_fds=(42,))
+                ['codex', 'resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox', '--no-daemon', '-i', 'picture.png'], close_fds=True)
 
     def test_pty_is_passed_to_native_codex(self):
         self.run_cli(prompt='')
@@ -273,9 +274,53 @@ print('native terminal')
 
     def test_ctrl_c_is_left_to_native_child(self):
         with patch('enikk.subprocess.Popen') as launch:
-            launch.return_value.wait.side_effect = [KeyboardInterrupt(), 0]
+            launch.return_value.wait.side_effect = [KeyboardInterrupt(), 0, 0]
             self.assertEqual(enikk.conversation('example-session', 42), 0)
             launch.return_value.terminate.assert_not_called()
+
+    def test_exit_and_signals_cleanup_detached_children(self):
+        for mode in ('normal', 'term', 'hup'):
+            with self.subTest(mode=mode):
+                self.run_cli(prompt='')
+                marker = self.base / ('child-' + mode)
+                fake = self.base / 'bin/codex'
+                fake.write_text("""#!/usr/bin/env python3
+import os, signal, time
+from pathlib import Path
+marker = Path(os.environ['CHILD_MARKER'])
+if os.fork() == 0:
+    os.setsid()
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    marker.write_text(str(os.getpid()))
+    while True: time.sleep(1)
+while not marker.exists(): time.sleep(0.01)
+if os.environ['EXIT_MODE'] == 'normal': raise SystemExit(0)
+while True: time.sleep(1)
+""")
+                env = self.env | {'PATH': str(self.base / 'bin') + os.pathsep + os.environ['PATH'],
+                                  'CHILD_MARKER': str(marker), 'EXIT_MODE': mode}
+                unrelated = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+                app = subprocess.Popen([str(self.app_root / 'codex_enikk')], env=env,
+                                       cwd=self.base, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                try:
+                    deadline = time.monotonic() + 5
+                    while not marker.exists() and time.monotonic() < deadline:
+                        time.sleep(0.02)
+                    self.assertTrue(marker.exists())
+                    pid = int(marker.read_text())
+                    if mode != 'normal':
+                        app.send_signal(signal.SIGTERM if mode == 'term' else signal.SIGHUP)
+                    _, err = app.communicate(timeout=10)
+                    self.assertEqual(app.returncode, {'normal': 0, 'term': 143, 'hup': 129}[mode], err)
+                    self.assertFalse(Path('/proc/' + str(pid)).exists(), 'Detached child survived')
+                    self.assertIsNone(unrelated.poll(), 'Unrelated process was terminated')
+                    self.assertEqual(self.run_cli().returncode, 0, 'Instance lock not released')
+                finally:
+                    if app.poll() is None:
+                        app.kill()
+                        app.wait()
+                    unrelated.terminate()
+                    unrelated.wait()
 
     def test_pin_is_backed_up_and_restored(self):
         self.write_session()
@@ -448,7 +493,7 @@ print('native terminal')
                 for name in ('codex_enikk', 'codex_session_save.sh'):
                     result = subprocess.run([str(prefix / 'bin' / name), '--version'], env=env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(result.stdout.strip(), 'codex_enikk 2.1.2')
+                    self.assertEqual(result.stdout.strip(), 'codex_enikk 2.1.3')
                 result = subprocess.run([str(prefix / 'bin/codex_enikk_restore'), '--help'], env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 # A command replaced by the user must survive uninstall.
@@ -477,7 +522,7 @@ print('native terminal')
         original = session.read_bytes()
         result = subprocess.run(['bash', str(ROOT / 'update.sh')], env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('codex_enikk 2.1.2', result.stdout)
+        self.assertIn('codex_enikk 2.1.3', result.stdout)
         previous = list(lib.glob('previous-*'))
         self.assertEqual(len(previous), 1)
         self.assertEqual((previous[0] / 'enikk.py').read_text(), 'print("old version")\n')

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Local Codex continuity wrapper. Python standard library only."""
 import io
+import ctypes
+import signal
+import time
 import fcntl
 import errno
 import socket
@@ -17,7 +20,7 @@ import tempfile
 import threading
 from datetime import datetime, timezone
 
-VERSION = '2.1.2'
+VERSION = '2.1.3'
 TRANSCRIPT_PART_BYTES = 10_000_000
 INSTANCE_SOCKET_PREFIX = '\0codex_enikk.instance.'
 ANSI = re.compile(r'\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]')
@@ -287,7 +290,7 @@ def pinned_session():
 @contextmanager
 def single_instance():
     # Linux abstract socket: per OS user, independent of cwd/HOME/CODEX_HOME.
-    # The kernel releases it on exit; never delete a lock file to unlock it.
+    # Only the wrapper owns this fd; never pass it to Codex or its daemons.
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as guard:
         try:
             guard.bind(INSTANCE_SOCKET_PREFIX + str(os.getuid()))
@@ -298,6 +301,96 @@ def single_instance():
         yield guard
 
 
+def process_table():
+    """Linux process identities include start time to avoid signalling reused PIDs."""
+    table = {}
+    for entry in Path('/proc').iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            fields = (entry / 'stat').read_text().rsplit(')', 1)[1].split()
+            table[int(entry.name)] = (int(fields[1]), fields[19])
+        except (OSError, ValueError, IndexError):
+            continue
+    return table
+
+
+def signal_owned(pid, started, signum):
+    try:
+        fd = os.pidfd_open(pid)
+    except ProcessLookupError:
+        return
+    try:
+        if process_table().get(pid, (None, None))[1] == started:
+            signal.pidfd_send_signal(fd, signum)
+    except ProcessLookupError:
+        pass
+    finally:
+        os.close(fd)
+
+
+def stop_children(existing, grace=2.0):
+    """Reap our adopted descendants too, including children that called setsid()."""
+    deadline = time.monotonic() + grace
+    signalled = set()
+    while True:
+        table = process_table()
+        owned = {pid for pid, (parent, born) in table.items()
+                 if parent == os.getpid() and (pid, born) not in existing}
+        while True:
+            more = {pid for pid, (parent, _) in table.items() if parent in owned}
+            if more <= owned:
+                break
+            owned.update(more)
+        if not owned:
+            return
+        for pid in owned:
+            born = table[pid][1]
+            # Collect children already exited instead of waiting on zombies.
+            try:
+                if os.waitpid(pid, os.WNOHANG)[0]:
+                    continue
+            except (ChildProcessError, ProcessLookupError):
+                pass
+            force = time.monotonic() >= deadline
+            if force or (pid, born) not in signalled:
+                signal_owned(pid, born, signal.SIGKILL if force else signal.SIGTERM)
+                signalled.add((pid, born))
+        if time.monotonic() > deadline + 3:
+            print("경고: 종료 신호 후에도 일부 자식이 남아 있습니다.", file=sys.stderr)
+            return
+        time.sleep(0.02)
+
+
+@contextmanager
+def owned_processes():
+    # Adopt orphaned grandchildren so cleanup can still find and reap them.
+    libc = ctypes.CDLL(None, use_errno=True)
+    previous = ctypes.c_int()
+    if libc.prctl(37, ctypes.byref(previous), 0, 0, 0) != 0:  # PR_GET_CHILD_SUBREAPER
+        raise OSError(ctypes.get_errno(), 'Cannot read child subreaper state')
+    if libc.prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER
+        raise OSError(ctypes.get_errno(), 'Cannot supervise Codex children')
+    existing = {(pid, born) for pid, (parent, born) in process_table().items()
+                if parent == os.getpid()}
+    handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGHUP, signal.SIGTERM)}
+    def terminate(signum, frame):
+        raise SystemExit(128 + signum)
+    try:
+        for sig in handlers:
+            signal.signal(sig, terminate)
+        yield
+    finally:
+        for sig in handlers:
+            signal.signal(sig, signal.SIG_IGN)
+        try:
+            stop_children(existing)
+        finally:
+            libc.prctl(36, previous.value, 0, 0, 0)
+            for sig, handler in handlers.items():
+                signal.signal(sig, handler)
+
+
 def conversation(session_id, instance_fd, args=()):
     """Let the native TUI own the terminal, clipboard, slash commands and rendering."""
     yolo = '--dangerously-bypass-approvals-and-sandbox'
@@ -306,30 +399,27 @@ def conversation(session_id, instance_fd, args=()):
     for arg in args:
         if arg == '--':
             literal = True
-        if not literal and arg in ('--yolo', yolo):
+        if not literal and arg in ('--yolo', yolo, '--no-daemon'):
             continue  # Always enabled below; keep aliases idempotent.
         options.append(arg)
-    command = ['codex', 'resume', session_id, yolo, *options]
+    command = ['codex', 'resume', session_id, yolo, '--no-daemon', *options]
     # Inherit stdin/stdout/stderr and the foreground terminal. Do not pipe or
     # parse TUI output: doing so breaks image paste, raw input and rendering.
-    child = subprocess.Popen(command, pass_fds=(instance_fd,))
-    try:
-        while True:
-            try:
-                status = child.wait()
-                return status if status >= 0 else 128 - status
-            except KeyboardInterrupt:
-                # The foreground child receives Ctrl+C too; let Codex handle it.
-                continue
-    except BaseException:
-        if child.poll() is None:
-            child.terminate()
+    with owned_processes():
+        # Never let descendants keep the wrapper's single-instance socket alive.
+        child = subprocess.Popen(command, close_fds=True)
         try:
-            child.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            child.kill()
-            child.wait()
-        raise
+            while True:
+                try:
+                    status = child.wait()
+                    return status if status >= 0 else 128 - status
+                except KeyboardInterrupt:
+                    # Codex receives Ctrl+C from the same foreground terminal.
+                    continue
+        finally:
+            # owned_processes handles the entire remaining tree on every exit path.
+            if child.poll() is not None:
+                child.wait()
 
 
 def main(args=None):
