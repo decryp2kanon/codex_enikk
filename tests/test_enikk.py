@@ -65,6 +65,9 @@ class EnikkTests(unittest.TestCase):
         self.addCleanup(self.namespace_patch.stop)
         self.patcher = patch.dict(os.environ, self.env, clear=True)
         self.patcher.start()
+        latest_patch = patch.object(enikk, "LATEST_TRANSCRIPT_FILE", None)
+        latest_patch.start()
+        self.addCleanup(latest_patch.stop)
         self.addCleanup(self.patcher.stop)
 
     def write_session(self, path=None, cwd=None):
@@ -500,7 +503,7 @@ while True: time.sleep(1)
         enikk.export_changed({}, self.base, output, 'example-session')
         parts = sorted(output.glob('*.txt'))
         self.assertEqual(''.join(p.read_text() for p in parts), enikk.transcript(session))
-        latest = self.base / 'backups/lightweight/codex-latest.txt'
+        latest = next((self.home / 'git').glob('codex-latest-*.txt'))
         self.assertIn('작업 완료', latest.read_text())
         self.assertEqual(session.read_bytes(), original)
         mtime = latest.stat().st_mtime_ns
@@ -510,6 +513,20 @@ while True: time.sleep(1)
         other.write_text(other.read_text().replace('example-session', 'other-session').replace('작업 완료', '다른 대화'))
         enikk.export_changed({}, self.base, output, 'example-session')
         self.assertNotIn('다른 대화', latest.read_text())
+
+    def test_latest_filename_per_run_and_directory_permissions(self):
+        session = self.write_session()
+        directory = self.home / 'git'
+        directory.mkdir(mode=0o755)
+        mode = directory.stat().st_mode
+        first = enikk.write_latest_transcript(session)
+        self.assertRegex(first.name, r'^codex-latest-\d{6}-\d{6}\.txt$')
+        self.assertEqual(enikk.write_latest_transcript(session), first)
+        with patch.object(enikk, 'LATEST_TRANSCRIPT_FILE', None):
+            second = enikk.write_latest_transcript(session)
+        self.assertNotEqual(first, second)
+        self.assertEqual(first.read_bytes(), second.read_bytes())
+        self.assertEqual(directory.stat().st_mode, mode)
 
     def test_exports_only_matching_cwd(self):
         self.write_session(cwd=self.base / 'other-project')
@@ -538,7 +555,7 @@ while True: time.sleep(1)
                 for name in ('codex_enikk', 'codex_session_save.sh'):
                     result = subprocess.run([str(prefix / 'bin' / name), '--version'], env=env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(result.stdout.strip(), 'codex_enikk 2.1.4')
+                    self.assertEqual(result.stdout.strip(), 'codex_enikk 2.1.5')
                 result = subprocess.run([str(prefix / 'bin/codex_enikk_restore'), '--help'], env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 # A command replaced by the user must survive uninstall.
@@ -567,7 +584,7 @@ while True: time.sleep(1)
         original = session.read_bytes()
         result = subprocess.run(['bash', str(ROOT / 'update.sh')], env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('codex_enikk 2.1.4', result.stdout)
+        self.assertIn('codex_enikk 2.1.5', result.stdout)
         previous = list(lib.glob('previous-*'))
         self.assertEqual(len(previous), 1)
         self.assertEqual((previous[0] / 'enikk.py').read_text(), 'print("old version")\n')

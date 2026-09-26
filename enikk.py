@@ -20,7 +20,8 @@ import tempfile
 import threading
 from datetime import datetime, timezone
 
-VERSION = '2.1.4'
+VERSION = '2.1.5'
+LATEST_TRANSCRIPT_FILE = None
 TRANSCRIPT_PART_BYTES = 10_000_000
 INSTANCE_SOCKET_PREFIX = '\0codex_enikk.instance.'
 ANSI = re.compile(r'\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]')
@@ -221,6 +222,7 @@ def write_transcript_parts(output, safe_id, text, limit=TRANSCRIPT_PART_BYTES):
 
 def write_latest_transcript(path, target=200_000):
     """Local-only handoff, retaining complete messages and the latest result."""
+    global LATEST_TRANSCRIPT_FILE
     events, fallback = [], []
     for record in records(path):
         payload = record.get('payload') or {}
@@ -265,9 +267,20 @@ def write_latest_transcript(path, target=200_000):
             keep.remove(i)
             total -= size
     data = ''.join(block for i, (block, _) in enumerate(messages) if i in keep).encode('utf-8')
-    output = backup_dir() / 'lightweight'
-    private_dir(output)
-    destination = output / 'codex-latest.txt'
+    output = Path.home() / 'git'
+    output.mkdir(parents=True, exist_ok=True)  # Do not change permissions of ~/git.
+    if LATEST_TRANSCRIPT_FILE is None:
+        while True:
+            candidate = output / datetime.now().strftime('codex-latest-%y%m%d-%H%M%S.txt')
+            try:
+                reserved = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            except FileExistsError:
+                time.sleep(0.1)  # A simultaneous run must not overwrite this file.
+                continue
+            os.close(reserved)
+            LATEST_TRANSCRIPT_FILE = candidate
+            break
+    destination = LATEST_TRANSCRIPT_FILE
     if destination.is_symlink():
         raise OSError(f'최신 대화 경로가 심볼릭 링크입니다: {destination}')
     if destination.exists() and destination.read_bytes() == data:
