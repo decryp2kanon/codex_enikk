@@ -2,6 +2,9 @@
 """Local Codex continuity wrapper. Python standard library only."""
 import io
 import fcntl
+import errno
+import socket
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -14,7 +17,7 @@ import tempfile
 import threading
 from datetime import datetime, timezone
 
-VERSION = '2.0.1'
+VERSION = '2.0.2'
 ANSI = re.compile(r'\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]')
 HELP = '''codex_enikk — 하나의 대화 계속 이어가기
 
@@ -237,7 +240,21 @@ def pinned_session():
     return session_id
 
 
-def conversation(session_id):
+@contextmanager
+def single_instance():
+    # Linux abstract socket: per OS user, independent of cwd/HOME/CODEX_HOME.
+    # The kernel releases it on exit; never delete a lock file to unlock it.
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as guard:
+        try:
+            guard.bind('\0codex_enikk.instance.' + str(os.getuid()))
+        except OSError as exc:
+            if exc.errno == errno.EADDRINUSE:
+                raise ValueError('codex_enikk가 이미 실행 중입니다. 기존 창을 사용하세요.') from None
+            raise
+        yield guard
+
+
+def conversation(session_id, instance_fd):
     """Own input loop: never expose Codex TUI session-switching commands."""
     print('연결된 대화를 이어갑니다. 한 줄씩 입력하세요. 종료: Ctrl+D', flush=True)
     while True:
@@ -255,7 +272,7 @@ def conversation(session_id):
         if pinned_session() != session_id:
             raise ValueError('연결된 대화가 변경되어 중단합니다.')
         command = ['codex', 'exec', 'resume', session_id, '--json', '--skip-git-repo-check', '-']
-        child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, pass_fds=(instance_fd,))
         identified = completed = failed = False
         try:
             child.stdin.write(prompt + '\n')
@@ -314,41 +331,42 @@ def main(args=None):
     if shutil.which('codex') is None:
         print('codex CLI를 먼저 설치해주세요.', file=sys.stderr)
         return 127
-    private_dir(codex_home())
-    # Keep one process per Codex home, including first-time session binding.
-    with (codex_home() / 'enikk-continuity.lock').open('a') as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise ValueError('이미 이 대화를 이어가는 앱이 실행 중입니다.')
-        session_id = pinned_session()
-        backup()
-        cwd = Path.cwd()
-        output = Path(os.environ.get('CODEX_ENIKK_LOG_DIR', str(backup_dir() / 'transcripts'))).expanduser()
-        baseline = {}
-        stop = threading.Event()
-        def watcher():
-            while not stop.wait(2):
-                try:
-                    export_changed(baseline, cwd, output, session_id)
-                except (OSError, ValueError) as exc:
-                    print(f'대화문 저장 경고: {exc}', file=sys.stderr)
-        thread = threading.Thread(target=watcher, daemon=True)
-        thread.start()
-        status = 1
-        try:
-            status = conversation(session_id)
-        finally:
-            stop.set()
-            thread.join()
-            for operation in (lambda: export_changed(baseline, cwd, output, session_id), backup):
-                try:
-                    operation()
-                except (OSError, ValueError) as exc:
-                    print(f'종료 시 저장 실패: {exc}. 원본 세션은 CODEX_HOME에 남아 있습니다.', file=sys.stderr)
-                    if status == 0:
-                        status = 1
-        return status
+    with single_instance() as guard:
+        private_dir(codex_home())
+        # Keep one process per Codex home, including first-time session binding.
+        with (codex_home() / 'enikk-continuity.lock').open('a') as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise ValueError('이미 이 대화를 이어가는 앱이 실행 중입니다.')
+            session_id = pinned_session()
+            backup()
+            cwd = Path.cwd()
+            output = Path(os.environ.get('CODEX_ENIKK_LOG_DIR', str(backup_dir() / 'transcripts'))).expanduser()
+            baseline = {}
+            stop = threading.Event()
+            def watcher():
+                while not stop.wait(2):
+                    try:
+                        export_changed(baseline, cwd, output, session_id)
+                    except (OSError, ValueError) as exc:
+                        print(f'대화문 저장 경고: {exc}', file=sys.stderr)
+            thread = threading.Thread(target=watcher, daemon=True)
+            thread.start()
+            status = 1
+            try:
+                status = conversation(session_id, guard.fileno())
+            finally:
+                stop.set()
+                thread.join()
+                for operation in (lambda: export_changed(baseline, cwd, output, session_id), backup):
+                    try:
+                        operation()
+                    except (OSError, ValueError) as exc:
+                        print(f'종료 시 저장 실패: {exc}. 원본 세션은 CODEX_HOME에 남아 있습니다.', file=sys.stderr)
+                        if status == 0:
+                            status = 1
+            return status
 
 
 if __name__ == '__main__':

@@ -132,6 +132,63 @@ class EnikkTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertFalse((self.base / 'args.json').exists())
 
+    def test_single_instance_blocks_different_home_and_codex_home(self):
+        with enikk.single_instance():
+            other = self.base / 'other-home'
+            other.mkdir()
+            self.env['HOME'] = str(other)
+            self.env['CODEX_HOME'] = str(other / '.codex')
+            result = self.run_cli()
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn('이미 실행 중', result.stderr)
+            self.assertFalse((other / '.codex').exists())
+            self.assertFalse((self.base / 'args.json').exists())
+        # The same command succeeds after the first instance releases its lock.
+        self.env['HOME'] = str(self.home)
+        self.env['CODEX_HOME'] = str(self.data)
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_two_running_apps_block_second_and_allow_after_exit(self):
+        import time
+        self.run_cli(prompt='')  # Prepare fake executable and an existing session.
+        env = self.env | {'PATH': str(self.base / 'bin') + os.pathsep + os.environ['PATH']}
+        with tempfile.TemporaryFile(mode='w+') as output:
+            first = subprocess.Popen([str(ROOT / 'codex_enikk')], cwd=self.base, env=env,
+                                     stdin=subprocess.PIPE, stdout=output, stderr=output, text=True)
+            try:
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    output.seek(0)
+                    if '나 >' in output.read():
+                        break
+                    if first.poll() is not None:
+                        self.fail('First app exited before opening its input prompt')
+                    time.sleep(0.02)
+                else:
+                    self.fail('First app did not reach its input prompt')
+                second = self.run_cli()
+                self.assertEqual(second.returncode, 1, second.stderr)
+                self.assertIn('이미 실행 중', second.stderr)
+                self.assertIsNone(first.poll())
+            finally:
+                first.communicate(input='', timeout=5)
+            self.assertEqual(first.returncode, 0)
+        self.assertEqual(self.run_cli().returncode, 0)
+
+    def test_child_holds_instance_lock_after_parent_guard_closes(self):
+        with enikk.single_instance() as guard:
+            child = subprocess.Popen([sys.executable, '-c', 'import sys; sys.stdin.read()'],
+                                     stdin=subprocess.PIPE, pass_fds=(guard.fileno(),))
+        try:
+            with self.assertRaises(ValueError):
+                with enikk.single_instance():
+                    pass
+        finally:
+            child.communicate(input=b'', timeout=5)
+        with enikk.single_instance():
+            pass
+
     def test_wrong_thread_or_incomplete_turn_stops(self):
         for settings in ({'wrong_thread': True}, {'incomplete': True}):
             result = self.run_cli(**settings)
@@ -252,7 +309,7 @@ class EnikkTests(unittest.TestCase):
                 for name in ('codex_enikk', 'codex_session_save.sh'):
                     result = subprocess.run([str(prefix / 'bin' / name), '--version'], env=env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(result.stdout.strip(), 'codex_enikk 2.0.1')
+                    self.assertEqual(result.stdout.strip(), 'codex_enikk 2.0.2')
                 result = subprocess.run([str(prefix / 'bin/codex_enikk_restore'), '--help'], env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 # A command replaced by the user must survive uninstall.
