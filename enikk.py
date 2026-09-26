@@ -17,19 +17,23 @@ import tempfile
 import threading
 from datetime import datetime, timezone
 
-VERSION = '2.0.2'
+VERSION = '2.1.0'
+INSTANCE_SOCKET_PREFIX = '\0codex_enikk.instance.'
 ANSI = re.compile(r'\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]')
-HELP = '''codex_enikk — 하나의 대화 계속 이어가기
+HELP = '''codex_enikk — 기존 대화를 원래 Codex 화면으로 이어가기
 
-  codex_enikk           고정된 대화 이어가기
-  codex_enikk --resume  같은 동작 (호환 옵션)
-  codex_enikk --help    도움말
-  codex_enikk --version 버전
+  codex_enikk                 연결된 대화를 Codex TUI로 재개
+  codex_enikk --resume        같은 동작 (호환 옵션)
+  codex_enikk --yolo          승인·샌드박스 제한 없이 실행
+  codex_enikk -i IMAGE        이미지 파일 첨부
+  codex_enikk -m MODEL        시작 모델 지정
+  codex_enikk --help          도움말
+  codex_enikk --version       버전
 
-처음에는 현재 Codex 세션, 현재 폴더, 전체 대화 순으로 기존 대화를 찾습니다.
-이후 폴더나 최근 세션이 바뀌어도 연결한 대화만 이어갑니다.
-새 대화·포크·세션 선택은 지원하지 않습니다. Ctrl+D로 종료합니다.
-백업: ~/git/codex-enikk-session-backups/
+Codex 자체 입력창, 이미지 붙여넣기, /model 등 슬래시 명령을 그대로 사용합니다.
+추가 인수는 codex resume에 전달합니다. 옵션 설명: codex resume --help
+시작 시 연결된 세션 ID를 사용하며, TUI 안의 세션 전환 명령은 차단하지 않습니다.
+시작·종료 시 백업: ~/git/codex-enikk-session-backups/
 '''
 
 
@@ -148,7 +152,7 @@ def text_content(content):
     if not isinstance(content, list):
         return ''
     return '\n'.join(str(p.get('text', '')) for p in content
-                     if isinstance(p, dict) and p.get('type') in ('text', 'input_text', 'output_text'))
+                     if isinstance(p, dict) and str(p.get('type', '')).lower() in ('text', 'input_text', 'output_text'))
 
 
 def transcript(path):
@@ -246,7 +250,7 @@ def single_instance():
     # The kernel releases it on exit; never delete a lock file to unlock it.
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as guard:
         try:
-            guard.bind('\0codex_enikk.instance.' + str(os.getuid()))
+            guard.bind(INSTANCE_SOCKET_PREFIX + str(os.getuid()))
         except OSError as exc:
             if exc.errno == errno.EADDRINUSE:
                 raise ValueError('codex_enikk가 이미 실행 중입니다. 기존 창을 사용하세요.') from None
@@ -254,67 +258,31 @@ def single_instance():
         yield guard
 
 
-def conversation(session_id, instance_fd):
-    """Own input loop: never expose Codex TUI session-switching commands."""
-    print('연결된 대화를 이어갑니다. 한 줄씩 입력하세요. 종료: Ctrl+D', flush=True)
-    while True:
-        try:
-            prompt = input('나 > ')
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return 0
-        if not prompt.strip():
-            continue
-        if prompt.lstrip().startswith('/'):
-            print('슬래시 명령은 지원하지 않습니다. 연결된 대화만 이어갑니다.', flush=True)
-            continue
-        # Check on every turn; never fall back to --last or a new session.
-        if pinned_session() != session_id:
-            raise ValueError('연결된 대화가 변경되어 중단합니다.')
-        command = ['codex', 'exec', 'resume', session_id, '--json', '--skip-git-repo-check', '-']
-        child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, pass_fds=(instance_fd,))
-        identified = completed = failed = False
-        try:
-            child.stdin.write(prompt + '\n')
-            child.stdin.close()
-            for line in child.stdout:
-                try:
-                    event = json.loads(line)
-                except ValueError:
-                    continue
-                if event.get('type') == 'thread.started':
-                    if event.get('thread_id') != session_id:
-                        child.terminate()
-                        raise ValueError('Codex가 다른 대화를 반환하여 중단합니다.')
-                    identified = True
-                if event.get('type') == 'turn.completed':
-                    completed = True
-                if event.get('type') == 'item.completed':
-                    item = event.get('item', {})
-                    if item.get('type') == 'agent_message':
-                        print('에닉 > ' + item.get('text', ''), flush=True)
-                if event.get('type') in ('error', 'turn.failed'):
-                    failed = True
-                    print(f'Codex 오류: {event}', file=sys.stderr)
-            status = child.wait()
-        except BaseException:
-            if child.poll() is None:
-                child.terminate()
+def conversation(session_id, instance_fd, args=()):
+    """Let the native TUI own the terminal, clipboard, slash commands and rendering."""
+    options = ['--dangerously-bypass-approvals-and-sandbox' if arg == '--yolo' else arg
+               for arg in args]
+    command = ['codex', 'resume', session_id, *options]
+    # Inherit stdin/stdout/stderr and the foreground terminal. Do not pipe or
+    # parse TUI output: doing so breaks image paste, raw input and rendering.
+    child = subprocess.Popen(command, pass_fds=(instance_fd,))
+    try:
+        while True:
             try:
-                child.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                child.kill()
-                child.wait()
-            raise
-        finally:
-            child.stdout.close()
-            if not child.stdin.closed:
-                child.stdin.close()
-        if status:
-            return status if status > 0 else 128 - status
-        if not identified or not completed or failed:
-            raise ValueError('같은 대화의 응답 완료를 확인하지 못했습니다. 대화를 전환하지 않고 중단합니다.')
-        backup()
+                status = child.wait()
+                return status if status >= 0 else 128 - status
+            except KeyboardInterrupt:
+                # The foreground child receives Ctrl+C too; let Codex handle it.
+                continue
+    except BaseException:
+        if child.poll() is None:
+            child.terminate()
+        try:
+            child.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait()
+        raise
 
 
 def main(args=None):
@@ -325,9 +293,8 @@ def main(args=None):
     if args == ['--version']:
         print(f'codex_enikk {VERSION}')
         return 0
-    if args not in ([], ['--resume']):
-        print('하나의 대화만 이어갑니다. 새 세션·포크·세션 변경·추가 옵션은 지원하지 않습니다.', file=sys.stderr)
-        return 2
+    if args[:1] == ['--resume']:
+        args.pop(0)
     if shutil.which('codex') is None:
         print('codex CLI를 먼저 설치해주세요.', file=sys.stderr)
         return 127
@@ -345,20 +312,23 @@ def main(args=None):
             output = Path(os.environ.get('CODEX_ENIKK_LOG_DIR', str(backup_dir() / 'transcripts'))).expanduser()
             baseline = {}
             stop = threading.Event()
+            save_errors = set()
             def watcher():
                 while not stop.wait(2):
                     try:
                         export_changed(baseline, cwd, output, session_id)
                     except (OSError, ValueError) as exc:
-                        print(f'대화문 저장 경고: {exc}', file=sys.stderr)
+                        save_errors.add(str(exc))  # Do not corrupt the active TUI.
             thread = threading.Thread(target=watcher, daemon=True)
             thread.start()
             status = 1
             try:
-                status = conversation(session_id, guard.fileno())
+                status = conversation(session_id, guard.fileno(), args)
             finally:
                 stop.set()
                 thread.join()
+                for error in sorted(save_errors):
+                    print(f'대화문 저장 경고: {error}', file=sys.stderr)
                 for operation in (lambda: export_changed(baseline, cwd, output, session_id), backup):
                     try:
                         operation()

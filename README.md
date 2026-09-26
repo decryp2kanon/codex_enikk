@@ -1,9 +1,10 @@
 # codex_enikk
 
-**2.0.2 · Linux · Python 3.10+ · MIT**
+**2.1.0 · Linux · Python 3.10+ · MIT**
 
-하나의 대화를 계속 이어가는 앱입니다. 처음 연결한 세션을 고정하고 매번 같은 ID로 재개합니다.
-새 대화 생성, 포크, 세션 선택, 세션 전환 기능은 없습니다.
+기존 대화를 **원래 Codex 대화형 화면(TUI)**으로 여는 실행기입니다.
+Codex의 입력창, 사진 첨부, Markdown 표시, `/model`, 승인 화면 등 기본 기능을 그대로 사용합니다.
+시작 시 연결된 세션 ID를 재개하며, 실행 중 Codex의 슬래시 명령은 차단하지 않습니다.
 
 ## 설치 및 실행
 
@@ -27,7 +28,9 @@ export PATH="$HOME/.local/bin:$PATH"
 ```
 
 기본 설치 경로는 `/usr/local/bin`, `/usr/local/lib/codex_enikk`입니다.
-기존 명령은 덮어쓰지 않습니다. 업데이트 시 기존 설치를 제거한 뒤 재설치하세요.
+최초 설치는 기존 명령을 덮어쓰지 않습니다. 기존 관리 설치를 업데이트하려면
+소스 폴더에서 `sudo bash ./update.sh`를 실행하세요. 이전 파일을 설치 폴더의
+`previous-*` 디렉터리에 보존합니다. 현재 실행 중인 앱은 종료 후 다시 실행해야 적용됩니다.
 
 ## 하나의 대화
 
@@ -38,38 +41,45 @@ export PATH="$HOME/.local/bin:$PATH"
 연결 기록은 직접 지우거나 편집하지 마세요. 기록까지 없애면 최초 연결로 처리됩니다.
 
 ```bash
-codex_enikk             # 연결된 하나의 대화
-codex_enikk --resume    # 호환 옵션: 같은 대화 재개, 선택 화면 없음
+codex_enikk                           # 원래 Codex 화면으로 연결된 대화 재개
+codex_enikk --resume                  # 호환 옵션
+codex_enikk --yolo                    # 승인·샌드박스 제한 없이 실행
+codex_enikk -i ~/Downloads/at.png     # 파일로 이미지 첨부
+codex_enikk -m MODEL                  # 시작 모델 선택
 codex_enikk --help
 codex_enikk --version
 ```
 
-한 줄씩 입력하고 Enter를 누르면 응답합니다. Ctrl+D로 종료합니다.
-`--new`, `--fork`, `fork`, `--resume ID`, 임의의 추가 CLI 옵션은 거부합니다.
-`/fork`, `/new`, `/resume`을 포함한 슬래시 명령도 Codex로 전달하지 않습니다.
-Codex 기본 TUI를 열지 않으므로 앱 안에 포크·세션 선택 화면이 없습니다.
+터미널의 입력·출력을 파이프로 바꾸지 않고 Codex에 직접 연결합니다.
+이미지 붙여넣기와 `/model`은 설치된 Codex 및 터미널의 기능을 그대로 사용합니다.
+클립보드 지원은 터미널/데스크톱 환경에 따라 달라지며 `-i`로 파일을 첨부할 수도 있습니다.
+추가 옵션과 시작 프롬프트는 `codex resume`에 전달합니다. `--yolo`는
+`--dangerously-bypass-approvals-and-sandbox`의 별칭이며 명시했을 때만 적용됩니다.
+나머지 실행 권한은 Codex 설정을 따릅니다. 모든 옵션은 `codex resume --help`에서 확인하세요.
+
+`/new`, `/fork`, `/resume` 등 원래 Codex 명령도 사용할 수 있습니다.
+다만 이 실행기의 시작 세션 연결 기록은 자동 변경하지 않으므로 다시 실행하면 원래 연결 ID로 돌아옵니다.
+다른 세션으로 전환한 경우 그 세션의 JSONL도 시작·종료 전체 백업에 포함되지만,
+주기적인 텍스트 내보내기는 시작 시 연결된 세션만 대상으로 합니다.
+
 같은 OS 사용자에서는 터미널·작업 폴더·`HOME`·`CODEX_HOME`·설치 경로가 달라도
 이 앱을 동시에 두 번 실행할 수 없습니다. 두 번째 실행은 기존 창을 사용하라는 안내와 함께 종료합니다.
 앱이 비정상 종료해도 잠금은 커널이 해제합니다. 실행 중인 Codex 자식 프로세스가 남아 있다면
 그 프로세스가 끝날 때까지 잠금을 유지합니다. 앱 밖에서 직접 실행한 `codex`는 이 잠금의 대상이 아닙니다.
 
-연결된 세션 파일이 없거나 손상된 연결 기록, 재개 실패, 다른 세션 ID 응답이 발생하면 중단합니다.
-다른 세션이나 새 대화로 자동 전환하지 않습니다. 원본이 유실되면 백업을 복구하세요.
+연결된 세션 파일이 없거나 연결 기록이 손상되면 시작을 중단합니다.
+다른 세션이나 새 대화를 자동으로 선택하지 않습니다. Codex에서 세션 사용 중 안내가 나오면
+기존 창을 종료하고 다시 시도하세요. 실행기가 임의로 포크하지 않습니다.
 
-내부적으로 [OpenAI 공식 비대화형 실행 방식](https://developers.openai.com/codex/noninteractive/)의
-`codex exec resume SESSION_ID --json --skip-git-repo-check -`를 사용합니다.
-세션 ID와 응답 완료 이벤트를 확인합니다. 입력은 표준입력으로 전달하며 셸 명령으로 실행하지 않습니다.
-Codex 자체를 수정하지 않으며, 앱 밖에서 직접 실행한 Codex의 기능까지 차단하지는 않습니다.
-
-이 입력 화면은 단일 행 텍스트만 지원합니다. 기본 TUI의 이미지 첨부·슬래시 명령·대화형 승인 화면은 없습니다.
-권한을 자동 해제하지 않으며 Codex의 비대화형 실행 권한 설정을 따릅니다.
-승인이 필요한 작업은 거부되거나 실패할 수 있습니다.
+내부 명령은 `codex resume SESSION_ID [추가 옵션]`입니다.
+별도의 한 줄 입력 루프나 비대화형 JSON 출력 변환을 사용하지 않습니다.
+Codex 자체는 수정하지 않습니다.
 
 ## 백업과 복구
 
 기본 백업 위치: **`~/git/codex-enikk-session-backups/`**
 
-- 시작 전, 응답 완료 후, 정상 종료 시 날짜별 `.tar.gz`를 생성합니다. 자동 삭제하지 않습니다.
+- 시작 전과 정상 종료 시 날짜별 `.tar.gz`를 생성합니다. 자동 삭제하지 않습니다.
 - `$CODEX_HOME`(기본 `~/.codex`)의 `sessions/`, `archived_sessions/` 아래 JSONL,
   `history.jsonl`, `session_index.jsonl`, `enikk-continuity.json`을 저장합니다.
 - 연결된 세션의 사용자·어시스턴트 텍스트를 약 2초마다 `transcripts/`에 저장합니다.
@@ -124,6 +134,8 @@ python3 -m unittest discover -s tests -v
 bash -n install.sh uninstall.sh codex_enikk codex_session_save.sh codex_enikk_restore
 ```
 
-테스트는 임시 폴더와 가짜 Codex를 사용합니다. 고정 세션, 분기 차단, 동시 실행 방지, 백업·복구,
+테스트는 임시 폴더와 가짜 Codex를 사용합니다. 고정 시작 세션, 네이티브 터미널 연결,
+이미지·모델·YOLO 옵션 전달, 동시 실행 방지, 백업·복구,
 사용자 설치 및 `DESTDIR`를 이용한 전역 설치 구조·제거를 검사합니다.
-실제 로그인·서버 응답은 자동 테스트 범위에 포함되지 않습니다.
+실제 로그인·서버 응답 및 데스크톱 클립보드는 자동 테스트 범위에 포함되지 않습니다.
+샌드박스에서 추상 소켓 bind가 금지되면 관련 테스트 3개는 사유를 표시하고 건너뜁니다.
