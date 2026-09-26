@@ -1,6 +1,6 @@
 # codex_enikk
 
-**2.1.3 · Linux · Python 3.10+ · MIT**
+**2.1.4 · Linux · Python 3.10+ · MIT**
 
 기존 대화를 **원래 Codex 대화형 화면(TUI)**으로 여는 실행기입니다.
 Codex의 입력창, 사진 첨부, Markdown 표시, `/model`, 승인 화면 등 기본 기능을 그대로 사용합니다.
@@ -140,6 +140,17 @@ CODEX_HOME="$HOME/codex-recovered" codex_enikk_restore /path/to/backup.tar.gz
 강제 종료·전원 차단 시 마지막 백업 이후 내용은 백업에 없을 수 있습니다.
 다른 프로그램이 동시에 쓰는 JSONL의 마지막 미완성 줄은 그대로 보존하고 텍스트 변환에서는 건너뜁니다.
 `auth.json`과 설정·키 파일은 포함하지 않지만 대화에 입력한 비밀정보는 기록에 포함될 수 있으므로 공개하지 마세요.
+
+## Dorothy 전달용 최신 대화
+
+`~/git/codex-enikk-session-backups/lightweight/codex-latest.txt`를 현재 연결된 세션에서
+약 2초마다 자동 갱신합니다. `CODEX_ENIKK_BACKUP_DIR` 지정 시 그 아래 `lightweight/`를 사용합니다.
+사용자·Codex 진행·최종 메시지만 로컬 JSONL에서 읽습니다. TTY, resume 및 전체 10MB archive는 변경하지 않습니다.
+
+UTF-8 기준 200,000바이트는 목표 크기입니다. 오래된 메시지를 완전한 단위로 제거하고
+최신 메시지와 최신 최종 답변을 우선 보존합니다. 이 필수 메시지들이 목표 크기를 넘으면
+자르지 않고 온전히 보존합니다. 요약이나 LLM 호출, Dorothy API 호출은 없습니다.
+필요할 때 이 TXT를 사용자가 직접 Dorothy에게 업로드합니다.
 
 ## 제거 및 테스트
 

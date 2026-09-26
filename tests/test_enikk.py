@@ -466,6 +466,51 @@ while True: time.sleep(1)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('계속 해줘', (self.base / 'logs/codex-session-example-session-part-000001.txt').read_text())
 
+    def test_latest_keeps_whole_messages_and_latest_final(self):
+        path = self.write_session()
+        def append(kind, body, phase=None):
+            item = {'type': kind, 'content': [{'type': 'Text', 'text': body}]}
+            if phase:
+                item['phase'] = phase
+            with path.open('a') as out:
+                out.write(json.dumps({'type': 'event_msg', 'payload': {'type': 'item_completed', 'item': item}}) + '\n')
+        result = '중요한 결과🙂'
+        append('AgentMessage', result, 'final_answer')
+        append('AgentMessage', '오래된진행' * 100, 'commentary')
+        append('AgentMessage', '숨긴추론', 'analysis')
+        append('UserMessage', '최신 질문')
+        output = enikk.write_latest_transcript(path, target=100)
+        data = output.read_text()
+        self.assertIn(result, data)
+        self.assertIn('최신 질문', data)
+        self.assertNotIn('오래된진행', data)
+        self.assertNotIn('숨긴추론', data)
+        self.assertLessEqual(output.stat().st_size, 100)
+        huge = '한글🙂' * 30_000
+        append('AgentMessage', huge, 'final_answer')
+        enikk.write_latest_transcript(path)
+        self.assertGreater(output.stat().st_size, 200_000)
+        self.assertEqual(output.read_text(), '[CODEX 최종]\n' + huge + '\n\n')
+        self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+
+    def test_latest_is_separate_and_does_not_change_archive(self):
+        session = self.write_session()
+        original = session.read_bytes()
+        output = self.base / 'logs'
+        enikk.export_changed({}, self.base, output, 'example-session')
+        parts = sorted(output.glob('*.txt'))
+        self.assertEqual(''.join(p.read_text() for p in parts), enikk.transcript(session))
+        latest = self.base / 'backups/lightweight/codex-latest.txt'
+        self.assertIn('작업 완료', latest.read_text())
+        self.assertEqual(session.read_bytes(), original)
+        mtime = latest.stat().st_mtime_ns
+        enikk.write_latest_transcript(session)
+        self.assertEqual(latest.stat().st_mtime_ns, mtime)
+        other = self.write_session(self.sessions / 'other.jsonl')
+        other.write_text(other.read_text().replace('example-session', 'other-session').replace('작업 완료', '다른 대화'))
+        enikk.export_changed({}, self.base, output, 'example-session')
+        self.assertNotIn('다른 대화', latest.read_text())
+
     def test_exports_only_matching_cwd(self):
         self.write_session(cwd=self.base / 'other-project')
         output = self.base / 'logs'
@@ -493,7 +538,7 @@ while True: time.sleep(1)
                 for name in ('codex_enikk', 'codex_session_save.sh'):
                     result = subprocess.run([str(prefix / 'bin' / name), '--version'], env=env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(result.stdout.strip(), 'codex_enikk 2.1.3')
+                    self.assertEqual(result.stdout.strip(), 'codex_enikk 2.1.4')
                 result = subprocess.run([str(prefix / 'bin/codex_enikk_restore'), '--help'], env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 # A command replaced by the user must survive uninstall.
@@ -522,7 +567,7 @@ while True: time.sleep(1)
         original = session.read_bytes()
         result = subprocess.run(['bash', str(ROOT / 'update.sh')], env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('codex_enikk 2.1.3', result.stdout)
+        self.assertIn('codex_enikk 2.1.4', result.stdout)
         previous = list(lib.glob('previous-*'))
         self.assertEqual(len(previous), 1)
         self.assertEqual((previous[0] / 'enikk.py').read_text(), 'print("old version")\n')

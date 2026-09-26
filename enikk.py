@@ -20,7 +20,7 @@ import tempfile
 import threading
 from datetime import datetime, timezone
 
-VERSION = '2.1.3'
+VERSION = '2.1.4'
 TRANSCRIPT_PART_BYTES = 10_000_000
 INSTANCE_SOCKET_PREFIX = '\0codex_enikk.instance.'
 ANSI = re.compile(r'\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]')
@@ -219,6 +219,69 @@ def write_transcript_parts(output, safe_id, text, limit=TRANSCRIPT_PART_BYTES):
     return sorted(active)
 
 
+def write_latest_transcript(path, target=200_000):
+    """Local-only handoff, retaining complete messages and the latest result."""
+    events, fallback = [], []
+    for record in records(path):
+        payload = record.get('payload') or {}
+        role, phase, body = None, None, ''
+        destination = events
+        if record.get('type') == 'event_msg':
+            kind = payload.get('type')
+            if kind in ('user_message', 'agent_message'):
+                role = 'user' if kind == 'user_message' else 'assistant'
+                phase = payload.get('phase', 'final_answer')
+                body = payload.get('message', '')
+            elif kind == 'item_completed':
+                item = payload.get('item') or {}
+                role = {'UserMessage': 'user', 'AgentMessage': 'assistant'}.get(item.get('type'))
+                phase = item.get('phase', 'final_answer')
+                body = text_content(item.get('content'))
+        elif record.get('type') == 'response_item' and payload.get('type') == 'message':
+            role = payload.get('role')
+            phase = payload.get('phase') or payload.get('channel') or 'final_answer'
+            body = text_content(payload.get('content'))
+            destination = fallback
+        if role not in ('user', 'assistant') or not body:
+            continue
+        if role == 'assistant' and phase not in ('commentary', 'final', 'final_answer', None):
+            continue
+        final = role == 'assistant' and phase != 'commentary'
+        label = '사용자' if role == 'user' else ('CODEX 최종' if final else 'CODEX 진행')
+        block = f'[{label}]\n{ANSI.sub("", str(body))}\n\n'
+        destination.append((block, final))
+    messages = events or fallback
+    protected = {len(messages) - 1}
+    latest_final = next((i for i in range(len(messages) - 1, -1, -1) if messages[i][1]), None)
+    if latest_final is not None:
+        protected.add(latest_final)
+    sizes = [len(block.encode('utf-8')) for block, _ in messages]
+    total = sum(sizes)
+    keep = set(range(len(messages)))
+    for i, size in enumerate(sizes):
+        if total <= target:
+            break
+        if i not in protected:
+            keep.remove(i)
+            total -= size
+    data = ''.join(block for i, (block, _) in enumerate(messages) if i in keep).encode('utf-8')
+    output = backup_dir() / 'lightweight'
+    private_dir(output)
+    destination = output / 'codex-latest.txt'
+    if destination.is_symlink():
+        raise OSError(f'최신 대화 경로가 심볼릭 링크입니다: {destination}')
+    if destination.exists() and destination.read_bytes() == data:
+        return destination
+    fd, temporary = tempfile.mkstemp(prefix='.latest-', dir=output)
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(data)
+        os.replace(temporary, destination)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    return destination
+
+
 def export_changed(baseline, cwd, output, session_id=None):
     for path in (codex_home() / 'sessions').rglob('*.jsonl'):
         if path.is_symlink() or not path.resolve().is_relative_to(codex_home()):
@@ -237,6 +300,8 @@ def export_changed(baseline, cwd, output, session_id=None):
         with os.fdopen(fd, 'w') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             write_transcript_parts(output, safe_id, transcript(path))
+            if session_id:
+                write_latest_transcript(path)
         baseline[str(path)] = (stat.st_mtime_ns, stat.st_size)
 
 
