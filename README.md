@@ -1,6 +1,6 @@
 # codex_enikk
 
-**2.1.0 · Linux · Python 3.10+ · MIT**
+**2.1.1 · Linux · Python 3.10+ · MIT**
 
 기존 대화를 **원래 Codex 대화형 화면(TUI)**으로 여는 실행기입니다.
 Codex의 입력창, 사진 첨부, Markdown 표시, `/model`, 승인 화면 등 기본 기능을 그대로 사용합니다.
@@ -41,9 +41,9 @@ export PATH="$HOME/.local/bin:$PATH"
 연결 기록은 직접 지우거나 편집하지 마세요. 기록까지 없애면 최초 연결로 처리됩니다.
 
 ```bash
-codex_enikk                           # 원래 Codex 화면으로 연결된 대화 재개
+codex_enikk                           # 원래 Codex 화면 + YOLO로 연결된 대화 재개
 codex_enikk --resume                  # 호환 옵션
-codex_enikk --yolo                    # 승인·샌드박스 제한 없이 실행
+codex_enikk --yolo                    # 기본 동작과 동일 (호환 옵션)
 codex_enikk -i ~/Downloads/at.png     # 파일로 이미지 첨부
 codex_enikk -m MODEL                  # 시작 모델 선택
 codex_enikk --help
@@ -53,9 +53,10 @@ codex_enikk --version
 터미널의 입력·출력을 파이프로 바꾸지 않고 Codex에 직접 연결합니다.
 이미지 붙여넣기와 `/model`은 설치된 Codex 및 터미널의 기능을 그대로 사용합니다.
 클립보드 지원은 터미널/데스크톱 환경에 따라 달라지며 `-i`로 파일을 첨부할 수도 있습니다.
-추가 옵션과 시작 프롬프트는 `codex resume`에 전달합니다. `--yolo`는
-`--dangerously-bypass-approvals-and-sandbox`의 별칭이며 명시했을 때만 적용됩니다.
-나머지 실행 권한은 Codex 설정을 따릅니다. 모든 옵션은 `codex resume --help`에서 확인하세요.
+추가 옵션과 시작 프롬프트는 `codex resume`에 전달합니다. **기본 실행은 YOLO 모드**이며
+`--dangerously-bypass-approvals-and-sandbox`를 자동 적용합니다. `--yolo`를 다시 붙여도 같은 동작입니다.
+명령 실행 승인과 샌드박스 제한을 사용하지 않습니다. OS의 sudo 인증은 별개입니다.
+모든 Codex 옵션은 `codex resume --help`에서 확인하세요.
 
 `/new`, `/fork`, `/resume` 등 원래 Codex 명령도 사용할 수 있습니다.
 다만 이 실행기의 시작 세션 연결 기록은 자동 변경하지 않으므로 다시 실행하면 원래 연결 ID로 돌아옵니다.

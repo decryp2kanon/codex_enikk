@@ -17,19 +17,20 @@ import tempfile
 import threading
 from datetime import datetime, timezone
 
-VERSION = '2.1.0'
+VERSION = '2.1.1'
 INSTANCE_SOCKET_PREFIX = '\0codex_enikk.instance.'
 ANSI = re.compile(r'\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]')
 HELP = '''codex_enikk — 기존 대화를 원래 Codex 화면으로 이어가기
 
-  codex_enikk                 연결된 대화를 Codex TUI로 재개
+  codex_enikk                 연결된 대화를 Codex TUI + YOLO로 재개
   codex_enikk --resume        같은 동작 (호환 옵션)
-  codex_enikk --yolo          승인·샌드박스 제한 없이 실행
+  codex_enikk --yolo          기본 동작과 동일 (호환 옵션)
   codex_enikk -i IMAGE        이미지 파일 첨부
   codex_enikk -m MODEL        시작 모델 지정
   codex_enikk --help          도움말
   codex_enikk --version       버전
 
+기본 실행은 YOLO 모드입니다. 명령 실행 승인과 샌드박스 제한을 사용하지 않습니다.
 Codex 자체 입력창, 이미지 붙여넣기, /model 등 슬래시 명령을 그대로 사용합니다.
 추가 인수는 codex resume에 전달합니다. 옵션 설명: codex resume --help
 시작 시 연결된 세션 ID를 사용하며, TUI 안의 세션 전환 명령은 차단하지 않습니다.
@@ -260,9 +261,16 @@ def single_instance():
 
 def conversation(session_id, instance_fd, args=()):
     """Let the native TUI own the terminal, clipboard, slash commands and rendering."""
-    options = ['--dangerously-bypass-approvals-and-sandbox' if arg == '--yolo' else arg
-               for arg in args]
-    command = ['codex', 'resume', session_id, *options]
+    yolo = '--dangerously-bypass-approvals-and-sandbox'
+    options = []
+    literal = False
+    for arg in args:
+        if arg == '--':
+            literal = True
+        if not literal and arg in ('--yolo', yolo):
+            continue  # Always enabled below; keep aliases idempotent.
+        options.append(arg)
+    command = ['codex', 'resume', session_id, yolo, *options]
     # Inherit stdin/stdout/stderr and the foreground terminal. Do not pipe or
     # parse TUI output: doing so breaks image paste, raw input and rendering.
     child = subprocess.Popen(command, pass_fds=(instance_fd,))

@@ -104,14 +104,14 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
     def test_default_resume_backup_and_log(self):
         result = self.run_cli()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads((self.base / 'args.json').read_text()), ['resume', 'example-session'])
+        self.assertEqual(json.loads((self.base / 'args.json').read_text()), ['resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox'])
         self.assertEqual(len(list((self.base / 'backups').glob('*.tar.gz'))), 2)
         self.assertIn('hello', (self.base / 'logs/codex-session-example-session.txt').read_text())
 
     def test_resume_alias_and_exit_code(self):
         result = self.run_cli('--resume', status=7)
         self.assertEqual(result.returncode, 7, result.stderr)
-        self.assertEqual(json.loads((self.base / 'args.json').read_text()), ['resume', 'example-session'])
+        self.assertEqual(json.loads((self.base / 'args.json').read_text()), ['resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox'])
 
     def test_native_options_forwarded(self):
         args = ('--resume', '--yolo', '-m', 'chosen-model', '-i', '/tmp/photo with spaces.png', '--no-alt-screen')
@@ -120,6 +120,13 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
         self.assertEqual(json.loads((self.base / 'args.json').read_text()),
                          ['resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox',
                           '-m', 'chosen-model', '-i', '/tmp/photo with spaces.png', '--no-alt-screen'])
+
+    def test_yolo_aliases_do_not_duplicate_flag_or_rewrite_literal_prompt(self):
+        flag = '--dangerously-bypass-approvals-and-sandbox'
+        result = self.run_cli('--yolo', flag, '--', '--yolo')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads((self.base / 'args.json').read_text()),
+                         ['resume', 'example-session', flag, '--', '--yolo'])
 
     def test_no_session_does_not_create_one(self):
         result = self.run_cli(seed=False)
@@ -237,7 +244,7 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
             launch.return_value.wait.return_value = 0
             self.assertEqual(enikk.conversation('example-session', 42, ['-i', 'picture.png']), 0)
             launch.assert_called_once_with(
-                ['codex', 'resume', 'example-session', '-i', 'picture.png'], pass_fds=(42,))
+                ['codex', 'resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox', '-i', 'picture.png'], pass_fds=(42,))
 
     def test_pty_is_passed_to_native_codex(self):
         self.run_cli(prompt='')
@@ -378,7 +385,7 @@ print('native terminal')
                 for name in ('codex_enikk', 'codex_session_save.sh'):
                     result = subprocess.run([str(prefix / 'bin' / name), '--version'], env=env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(result.stdout.strip(), 'codex_enikk 2.1.0')
+                    self.assertEqual(result.stdout.strip(), 'codex_enikk 2.1.1')
                 result = subprocess.run([str(prefix / 'bin/codex_enikk_restore'), '--help'], env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 # A command replaced by the user must survive uninstall.
@@ -407,7 +414,7 @@ print('native terminal')
         original = session.read_bytes()
         result = subprocess.run(['bash', str(ROOT / 'update.sh')], env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('codex_enikk 2.1.0', result.stdout)
+        self.assertIn('codex_enikk 2.1.1', result.stdout)
         previous = list(lib.glob('previous-*'))
         self.assertEqual(len(previous), 1)
         self.assertEqual((previous[0] / 'enikk.py').read_text(), 'print("old version")\n')
