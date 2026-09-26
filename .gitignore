@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.venv/
+codex-session-*.txt
+*.tar.gz
+codex-enikk-session-backups/
+작업연속성.md
+.env
