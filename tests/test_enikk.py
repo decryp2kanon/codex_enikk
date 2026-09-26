@@ -39,12 +39,12 @@ class EnikkTests(unittest.TestCase):
         self.home = self.base / 'home'
         self.home.mkdir()
         self.data = self.home / '.codex'
+        self.enikk_data = self.base / 'enikk-data'
         self.sessions = self.data / 'sessions'
         self.sessions.mkdir(parents=True)
         self.env = os.environ.copy()
         self.env.update(HOME=str(self.home), CODEX_HOME=str(self.data),
-                        CODEX_ENIKK_BACKUP_DIR=str(self.base / 'backups'),
-                        CODEX_ENIKK_LOG_DIR=str(self.base / 'logs'))
+                        CODEX_ENIKK_DATA_DIR=str(self.enikk_data))
         self.env.pop('CODEX_THREAD_ID', None)
         self.env.update(ARG_CAPTURE=str(self.base / 'args.json'), FAKE_STATUS='0')
         # Do not contend with the user's currently running app during tests.
@@ -110,8 +110,8 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
         result = self.run_cli()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads((self.base / 'args.json').read_text()), ['resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox', '--no-daemon'])
-        self.assertEqual(len(list((self.base / 'backups').glob('*.tar.gz'))), 2)
-        self.assertIn('hello', (self.base / 'logs/codex-session-example-session-part-000001.txt').read_text())
+        self.assertEqual(len(list((self.enikk_data / 'backups').glob('*.tar.gz'))), 2)
+        self.assertIn('hello', (self.enikk_data / 'transcripts/codex-session-example-session-part-000001.txt').read_text())
 
     def test_resume_alias_and_exit_code(self):
         result = self.run_cli('--resume', status=7)
@@ -142,7 +142,7 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
         prompt = '/model\n/new\n/resume\nmultiline text\n'
         result = self.run_cli(prompt=prompt)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(prompt, (self.base / 'logs/codex-session-example-session-part-000001.txt').read_text())
+        self.assertIn(prompt, (self.enikk_data / 'transcripts/codex-session-example-session-part-000001.txt').read_text())
         self.assertIn('native reply', result.stdout)
         self.assertNotIn('나 >', result.stdout)
 
@@ -337,16 +337,18 @@ while True: time.sleep(1)
         self.assertEqual(state.stat().st_mode & 0o777, 0o600)
 
     def test_backup_failure_prevents_launch(self):
-        (self.base / 'backups').write_text('not a directory')
+        self.enikk_data.mkdir()
+        (self.enikk_data / 'backups').write_text('not a directory')
         result = self.run_cli()
         self.assertEqual(result.returncode, 1)
         self.assertFalse((self.base / 'args.json').exists())
 
     def test_transcript_failure_still_backs_up_session(self):
-        (self.base / 'logs').write_text('not a directory')
+        self.enikk_data.mkdir()
+        (self.enikk_data / 'transcripts').write_text('not a directory')
         result = self.run_cli()
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(len(list((self.base / 'backups').glob('*.tar.gz'))), 2)
+        self.assertEqual(len(list((self.enikk_data / 'backups').glob('*.tar.gz'))), 2)
         self.assertTrue((self.sessions / 'rollout-example.jsonl').exists())
 
     def test_archive_contents_permissions_and_exact_bytes(self):
@@ -467,7 +469,7 @@ while True: time.sleep(1)
                                  '--session', 'example-session', '--once'],
                                 env=self.env, cwd=self.base, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('계속 해줘', (self.base / 'logs/codex-session-example-session-part-000001.txt').read_text())
+        self.assertIn('계속 해줘', (self.enikk_data / 'transcripts/codex-session-example-session-part-000001.txt').read_text())
 
     def test_latest_keeps_whole_messages_and_latest_final(self):
         path = self.write_session()
@@ -503,7 +505,7 @@ while True: time.sleep(1)
         enikk.export_changed({}, self.base, output, 'example-session')
         parts = sorted(output.glob('*.txt'))
         self.assertEqual(''.join(p.read_text() for p in parts), enikk.transcript(session))
-        latest = next((self.home / 'git').glob('codex-latest-*.txt'))
+        latest = next((self.enikk_data / 'latest').glob('codex-latest-*.txt'))
         self.assertIn('작업 완료', latest.read_text())
         self.assertEqual(session.read_bytes(), original)
         mtime = latest.stat().st_mtime_ns
@@ -516,9 +518,7 @@ while True: time.sleep(1)
 
     def test_latest_filename_per_run_and_directory_permissions(self):
         session = self.write_session()
-        directory = self.home / 'git'
-        directory.mkdir(mode=0o755)
-        mode = directory.stat().st_mode
+        directory = self.enikk_data / 'latest'
         first = enikk.write_latest_transcript(session)
         self.assertRegex(first.name, r'^codex-latest-\d{6}-\d{6}\.txt$')
         self.assertEqual(enikk.write_latest_transcript(session), first)
@@ -526,7 +526,20 @@ while True: time.sleep(1)
             second = enikk.write_latest_transcript(session)
         self.assertNotEqual(first, second)
         self.assertEqual(first.read_bytes(), second.read_bytes())
-        self.assertEqual(directory.stat().st_mode, mode)
+        self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
+
+    def test_storage_is_independent_of_cwd_and_rejects_git_repositories(self):
+        session = self.write_session()
+        repository = self.base / 'project'
+        (repository / '.git').mkdir(parents=True)
+        with patch('pathlib.Path.cwd', return_value=repository):
+            enikk.write_latest_transcript(session)
+            enikk.export_changed({}, repository, enikk.transcript_dir(), 'example-session')
+        self.assertFalse(list(repository.glob('codex-*.txt')))
+        self.assertTrue(list((self.enikk_data / 'latest').glob('codex-latest-*.txt')))
+        self.assertTrue(list((self.enikk_data / 'transcripts').glob('codex-session-*.txt')))
+        with self.assertRaises(ValueError):
+            enikk.write_transcript_parts(repository / 'exports', 'test', 'text')
 
     def test_exports_only_matching_cwd(self):
         self.write_session(cwd=self.base / 'other-project')
@@ -543,7 +556,7 @@ while True: time.sleep(1)
         (self.sessions / 'link.jsonl').symlink_to(private)
         with self.assertRaises(OSError):
             enikk.backup()
-        self.assertEqual(list((self.base / 'backups').iterdir()), [])
+        self.assertEqual(list((self.enikk_data / 'backups').iterdir()), [])
 
     def test_install_uninstall_global_stage_and_user_prefix(self):
         for staged in (True, False):
@@ -555,7 +568,7 @@ while True: time.sleep(1)
                 for name in ('codex_enikk', 'codex_session_save.sh'):
                     result = subprocess.run([str(prefix / 'bin' / name), '--version'], env=env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(result.stdout.strip(), 'codex_enikk 2.1.5')
+                    self.assertEqual(result.stdout.strip(), 'codex_enikk 2.1.6')
                 result = subprocess.run([str(prefix / 'bin/codex_enikk_restore'), '--help'], env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 # A command replaced by the user must survive uninstall.
@@ -584,7 +597,7 @@ while True: time.sleep(1)
         original = session.read_bytes()
         result = subprocess.run(['bash', str(ROOT / 'update.sh')], env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('codex_enikk 2.1.5', result.stdout)
+        self.assertIn('codex_enikk 2.1.6', result.stdout)
         previous = list(lib.glob('previous-*'))
         self.assertEqual(len(previous), 1)
         self.assertEqual((previous[0] / 'enikk.py').read_text(), 'print("old version")\n')

@@ -20,7 +20,7 @@ import tempfile
 import threading
 from datetime import datetime, timezone
 
-VERSION = '2.1.5'
+VERSION = '2.1.6'
 LATEST_TRANSCRIPT_FILE = None
 TRANSCRIPT_PART_BYTES = 10_000_000
 INSTANCE_SOCKET_PREFIX = '\0codex_enikk.instance.'
@@ -39,7 +39,7 @@ HELP = '''codex_enikk — 기존 대화를 원래 Codex 화면으로 이어가�
 Codex 자체 입력창, 이미지 붙여넣기, /model 등 슬래시 명령을 그대로 사용합니다.
 추가 인수는 codex resume에 전달합니다. 옵션 설명: codex resume --help
 시작 시 연결된 세션 ID를 사용하며, TUI 안의 세션 전환 명령은 차단하지 않습니다.
-시작·종료 시 백업: ~/git/codex-enikk-session-backups/
+저장 위치: ~/.local/share/codex_enikk/
 '''
 
 
@@ -48,8 +48,37 @@ def codex_home():
     return Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex'))).expanduser().resolve()
 
 
+def data_dir():
+    configured = Path(os.environ.get(
+        'CODEX_ENIKK_DATA_DIR', str(Path.home() / '.local/share/codex_enikk'))).expanduser()
+    if not configured.is_absolute():
+        raise ValueError('CODEX_ENIKK_DATA_DIR는 절대 경로여야 합니다.')
+    path = configured.resolve()
+    if any((parent / '.git').exists() for parent in (path, *path.parents)):
+        raise ValueError(f'Codex Enikk 저장 위치는 Git 저장소 밖이어야 합니다: {path}')
+    return path
+
+
+def validate_storage_dir(path):
+    path = Path(path).expanduser()
+    if not path.is_absolute():
+        raise ValueError('대화문 저장 위치는 절대 경로여야 합니다.')
+    path = path.resolve()
+    if any((parent / '.git').exists() for parent in (path, *path.parents)):
+        raise ValueError(f'대화문은 Git 저장소 안에 저장할 수 없습니다: {path}')
+    return path
+
+
 def backup_dir():
-    return Path(os.environ.get('CODEX_ENIKK_BACKUP_DIR', str(Path.home() / 'git/codex-enikk-session-backups'))).expanduser()
+    return data_dir() / 'backups'
+
+
+def transcript_dir():
+    return data_dir() / 'transcripts'
+
+
+def latest_transcript_dir():
+    return data_dir() / 'latest'
 
 
 def records(path):
@@ -185,6 +214,7 @@ def write_transcript_parts(output, safe_id, text, limit=TRANSCRIPT_PART_BYTES):
     """Atomically update numbered UTF-8 files, each at most 10 MB by default."""
     if limit < 4:
         raise ValueError('TXT 분할 크기는 최소 4바이트여야 합니다.')
+    output = validate_storage_dir(output)
     private_dir(output)
     data = text.encode('utf-8')
     start = 0
@@ -267,8 +297,8 @@ def write_latest_transcript(path, target=200_000):
             keep.remove(i)
             total -= size
     data = ''.join(block for i, (block, _) in enumerate(messages) if i in keep).encode('utf-8')
-    output = Path.home() / 'git'
-    output.mkdir(parents=True, exist_ok=True)  # Do not change permissions of ~/git.
+    output = latest_transcript_dir()
+    private_dir(output)
     if LATEST_TRANSCRIPT_FILE is None:
         while True:
             candidate = output / datetime.now().strftime('codex-latest-%y%m%d-%H%M%S.txt')
@@ -524,7 +554,7 @@ def main(args=None):
             session_id = pinned_session()
             backup()
             cwd = Path.cwd()
-            output = Path(os.environ.get('CODEX_ENIKK_LOG_DIR', str(backup_dir() / 'transcripts'))).expanduser()
+            output = transcript_dir()
             baseline = {}
             stop = threading.Event()
             save_errors = set()
