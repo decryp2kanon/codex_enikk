@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+entry="$(readlink -f -- "${BASH_SOURCE[0]}")"
+python="${CODEX_ENIKK_CHATTERBOX_HOME:-$HOME/Apps/chatterbox-yuki}/.venv/bin/python"
+if [[ ! -x "$python" ]]; then python=python3; fi
+exec "$python" "$(dirname -- "$entry")/check_codex_compat.py" "$@"

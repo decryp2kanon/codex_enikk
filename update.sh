@@ -21,6 +21,13 @@ for file in enikk.py VERSION README.md; do
     [[ -f "$source_dir/$file" && -f "$lib/$file" && ! -L "$lib/$file" ]] || exit 1
 done
 [[ -d "$source_dir/tts" ]] || exit 1
+checker="${stage}${prefix}/bin/check-codex-compat"
+if [[ -e "$checker" || -L "$checker" ]]; then
+    [[ -L "$checker" && "$(readlink -- "$checker")" == ../lib/codex_enikk/check-codex-compat ]] || {
+        echo '기존 check-codex-compat 명령을 덮어쓰지 않습니다.' >&2
+        exit 1
+    }
+fi
 previous="$(mktemp -d "$lib/previous-XXXXXXXX")"
 for file in enikk.py VERSION README.md; do
     cp -a -- "$lib/$file" "$previous/$file"
@@ -36,17 +43,21 @@ trap cleanup EXIT
 if [[ -f "$lib/latest.py" ]]; then
     cp -a -- "$lib/latest.py" "$previous/latest.py"
 fi
-for file in persistence.py restore.py; do
+for file in persistence.py restore.py check_codex_compat.py check-codex-compat uninstall.sh; do
     if [[ -f "$lib/$file" ]]; then
         cp -a -- "$lib/$file" "$previous/$file"
     fi
 done
-for file in README.md VERSION latest.py persistence.py restore.py enikk.py; do
+for file in README.md VERSION latest.py persistence.py restore.py enikk.py check_codex_compat.py check-codex-compat uninstall.sh; do
     temporary="$(mktemp "$lib/.$file.XXXXXXXX")"
     install -m 644 -- "$source_dir/$file" "$temporary"
     mv -f -- "$temporary" "$lib/$file"
     temporary=""
 done
+chmod 755 "$lib/check-codex-compat" "$lib/uninstall.sh"
+if [[ ! -L "$checker" ]]; then
+    ln -s -- ../lib/codex_enikk/check-codex-compat "$checker"
+fi
 tts_temporary="$(mktemp -d "$lib/.tts.XXXXXXXX")"
 for file in README.md setup-tts.sh yuki-chatterbox-engine.py yuki-codex-notify.py yuki-codex-rollout-watch.py yuki-codex-stream.py; do
     install -m 644 -- "$source_dir/tts/$file" "$tts_temporary/$file"

@@ -304,3 +304,29 @@ Codex 버전 또는 초기화 실패 시 기존 `--no-daemon`과 완료 메시�
 실행 중인 에닉 대화는 `~/codex-latest.txt`에 `[USER]` / `[ENIKK]` 일반 텍스트로 자동 갱신됩니다. 최대 200,000바이트이며 오래된 메시지부터 제거합니다. 단일 메시지가 제한보다 크면 UTF-8 경계를 지켜 최신 부분만 남깁니다. 영구 백업이 아닌 현재 대화의 편의용 미러입니다. `gedit ~/codex-latest.txt`에서 열고 새로 불러와 복사할 수 있습니다.
 
 대화 DB는 별도 백그라운드 작업에서 읽기 전용으로 확인하며 보통 1초 이내에 반영합니다. 현재 스레드를 재개하면 이전 텍스트도 복원되지만 이전 실행의 TTS는 재생하지 않습니다. Streaming 모드의 새 스레드 생성/첫 입력도 자동 추적합니다. TTS 비활성화 또는 legacy 모드에서는 wrapper가 시작한 스레드를 표시합니다. 원본 Codex 기록과 기존 백업 파일은 변경하지 않습니다.
+
+## Codex 업데이트 전 호환성 검사
+
+Codex를 교체하기 전에 명시적인 binary를 검사할 수 있습니다. 검사기는 버전을 설치하거나 업데이트하지 않습니다.
+
+```bash
+check-codex-compat /path/to/codex
+# 계정에서 사용할 모델을 지정하거나 JSON 결과를 받으려면:
+check-codex-compat /path/to/codex --model gpt-6-astra --json
+```
+
+`/tmp/enikk-compat-*` 안에 별도 HOME/CODEX_HOME·thread·socket을 만들고 실제 native TUI remote 연결,
+문장 delta/완료, 읽기 전용 `pwd` tool, interruption, SQLite/rollout, 현재 latest parser와 snapshot 호환성을 검사합니다.
+승인 흐름은 안전한 명령에 강제 승인을 요구하지 않고 candidate가 제공하는 request/decision schema 수준으로 확인합니다.
+로그인 정보는 기본 CODEX_HOME의 `auth.json`만 읽어서 임시 홈으로 복사합니다. `--auth-file /path/auth.json`으로
+명시할 수도 있습니다. 실제 대화·설정·TTS queue·latest 파일은 사용하지 않습니다. 짧은 모델 요청이 발생하므로
+로그인과 네트워크가 필요합니다. Chatterbox나 GPU 모델은 실행하지 않습니다.
+
+기존 TTS venv의 `websocket-client`를 사용하며 별도 dependency를 설치하지 않습니다. venv가 없으면 system Python을
+사용하고 WebSocket dependency 부재를 실패로 보고합니다. 성공/실패 모두 process와 임시 데이터·인증 복사본을 정리합니다.
+전체 timeout 기본값은 240초이며 `--timeout 30..300`으로 제한할 수 있습니다. exit 0은 `COMPATIBLE`, 그 외는 실패입니다.
+FAIL 결과에는 위치와 expected/observed가 포함됩니다. 인증·네트워크 실패 역시 검증 미완료이므로 통과시키지 않습니다.
+
+현재 wrapper는 Codex 0.158.0에 명시적으로 고정되어 있습니다. 다른 candidate가 protocol 검사를 통과해도
+`wrapper version gate`에서 이를 알리고 `INCOMPATIBLE`로 판정합니다. 검사기가 pin을 자동 변경하지 않습니다.
+새 버전 허용은 검증 결과를 검토한 뒤 별도 변경으로 진행합니다. 26초 수준의 TTS warmup 최적화는 이 검사의 범위가 아닙니다.

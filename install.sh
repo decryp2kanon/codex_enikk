@@ -7,7 +7,7 @@ stage="${DESTDIR:-}"
 [[ -z "$stage" || "$stage" == /* ]] || { echo 'DESTDIR는 절대 경로여야 합니다.' >&2; exit 1; }
 base="${stage}${prefix}"
 lib="$base/lib/codex_enikk"
-commands=(codex_enikk codex_session_save.sh codex_enikk_restore)
+commands=(codex_enikk codex_session_save.sh codex_enikk_restore check-codex-compat)
 command -v python3 >/dev/null
 python3 -c 'import sys; assert sys.version_info >= (3, 10), "Python 3.10+ required"'
 if [[ -e "$lib" || -L "$lib" ]]; then
@@ -36,7 +36,7 @@ cleanup() {
     fi
 }
 trap cleanup EXIT
-for file in enikk.py latest.py persistence.py restore.py README.md LICENSE VERSION uninstall.sh "${commands[@]}"; do
+for file in enikk.py latest.py persistence.py restore.py check_codex_compat.py README.md LICENSE VERSION uninstall.sh "${commands[@]}"; do
     install -m 644 -- "$source_dir/$file" "$lib/$file"
 done
 for file in README.md setup-tts.sh yuki-chatterbox-engine.py yuki-codex-notify.py yuki-codex-rollout-watch.py yuki-codex-stream.py; do

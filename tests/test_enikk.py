@@ -672,6 +672,8 @@ while True: time.sleep(1)
                 prefix = Path(env['DESTDIR'] + env['PREFIX'])
                 result = subprocess.run([str(ROOT / 'install.sh')], env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
+                compat_help = subprocess.run([str(prefix / 'bin/check-codex-compat'), '--help'], env=env, capture_output=True, text=True)
+                self.assertEqual(compat_help.returncode, 0, compat_help.stderr)
                 self.assertEqual((prefix / 'lib/codex_enikk/tts/yuki-codex-stream.py').read_bytes(), (ROOT / 'tts/yuki-codex-stream.py').read_bytes())
                 for name in ('codex_enikk', 'codex_session_save.sh'):
                     result = subprocess.run([str(prefix / 'bin' / name), '--version'], env=env, capture_output=True, text=True)
