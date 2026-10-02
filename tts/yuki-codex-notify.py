@@ -56,7 +56,7 @@ def ensure_engine():
     chatterbox_python = chatterbox_root / ".venv/bin/python"
     use_chatterbox = (ROOT / "yuki-chatterbox-engine.py").is_file() and chatterbox_python.is_file()
     if not use_chatterbox:
-        log_status("Chatterbox unavailable; TTS skipped (Supertonic runtime disabled)")
+        log_status("Chatterbox unavailable; TTS skipped")
         return
     engine = ROOT / "yuki-chatterbox-engine.py"
     python = chatterbox_python

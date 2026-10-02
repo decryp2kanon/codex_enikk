@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Local Codex continuity wrapper. Python standard library only."""
 import io
-import importlib.util
 import ctypes
 import signal
 import time
@@ -551,11 +550,11 @@ def conversation(session_id, instance_fd, args=()):
     with owned_processes():
         install_root = Path(__file__).resolve().parent
         tts_script = install_root / 'tts' / 'yuki-codex-rollout-watch.py'
-        venv_python = install_root / 'tts-venv' / 'bin' / 'python'
-        tts_python = str(venv_python) if venv_python.is_file() else sys.executable
-        tts_module = venv_python.is_file() or importlib.util.find_spec('supertonic') is not None
+        chatterbox_python = Path(os.environ.get('CODEX_ENIKK_CHATTERBOX_HOME',
+                                                Path.home() / 'Apps/chatterbox-yuki')) / '.venv/bin/python'
+        tts_python = sys.executable
         tts_ready = (os.environ.get('CODEX_ENIKK_TTS', '1') != '0' and tts_script.is_file()
-                     and tts_module and shutil.which('ffmpeg') and shutil.which('aplay'))
+                     and chatterbox_python.is_file() and shutil.which('aplay'))
         if tts_ready:
             # TTS is optional: it follows completed user-facing Codex messages,
             # while failures stay isolated from the native TUI.

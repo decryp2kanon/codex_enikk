@@ -162,17 +162,14 @@ UTF-8 기준 200,000바이트는 목표 크기입니다. 오래된 메시지를 
 
 `codex_enikk`는 설치된 TTS 의존성을 찾으면 CODEX 진행 메시지와 최종 메시지를 확정된
 유키짱 음성으로 읽습니다. 사용자 입력, reasoning, 도구 출력과 로그는 읽지 않습니다.
-Supertonic 모델과 음색은 worker 시작 시 한 번 로드하고, 문장 합성과 재생을 순서대로
-pipeline합니다. 음성 설정과 설치 요구사항은 [`tts/README.md`](tts/README.md)에 있습니다.
+Chatterbox 모델과 SUPER-CLEAN C2 conditioning은 worker 시작 시 한 번 준비하고 재사용합니다.
+음성 설정과 설치 요구사항은 [`tts/README.md`](tts/README.md)에 있습니다.
 
 TTS 의존성이 없거나 TTS가 실패해도 Codex TUI, 세션 연속성, 백업과 transcript는 계속
-동작합니다. Supertonic 모델 캐시, WAV, 세션 파일과 인증 정보는 저장소나 관리 설치에
-포함하지 않습니다.
+동작합니다. Chatterbox 모델, WAV, 세션 파일과 인증 정보는 저장소나 관리 설치에 포함하지 않습니다.
 
-신규 Ubuntu root 설치는 `python3-venv`, `ffmpeg`, `alsa-utils`, `librubberband2`,
-`libsndfile1`을 준비하고 전용
-`tts-venv`에 `supertonic==1.3.1`을 설치합니다. 모델은 첫 음성 생성 때 사용자 캐시
-`~/.cache/supertonic3`에 받아 재사용합니다. `CODEX_ENIKK_TTS=0`은 실행 시 TTS를 끄고,
+신규 Ubuntu root 설치는 `alsa-utils`를 준비하고 외부 `~/Apps/chatterbox-yuki` 환경을 확인합니다.
+`CODEX_ENIKK_TTS=0`은 실행 시 TTS를 끄고,
 `CODEX_ENIKK_INSTALL_TTS=0`은 설치·업데이트 중 선택 구성 준비를 건너뜁니다. 제거 시
 프로그램의 venv와 스타일은 제거하지만 사용자 모델 캐시는 보존합니다.
 
@@ -191,8 +188,7 @@ codex_enikk
 
 별도 TTS 명령을 실행할 필요는 없습니다. `codex_enikk`를 실행하면 TTS worker가 함께
 시작되고, 화면에 완성되어 표시된 CODEX 진행 메시지와 최종 답변을 순서대로 읽습니다.
-첫 음성에서는 Supertonic 3 모델을 사용자 캐시에 받으므로 네트워크 상태에 따라 시간이
-걸릴 수 있습니다. 이후 실행에서는 같은 캐시를 재사용합니다.
+Chatterbox CUDA 모델은 persistent worker가 한 번 로드한 뒤 재사용합니다.
 
 한국어 문장 안의 연속된 영문 기술어는 동일한 유키짱 음색을 유지하면서 영어 발음으로
 합성합니다. 예를 들어 `CPU usage`, `GitHub branch`, `TTS latency` 같은 구간만 영어로
@@ -207,7 +203,7 @@ routing하고 주변 한국어는 계속 한국어로 읽습니다. 각 언어 s
 
 ```bash
 sudo apt-get update
-sudo apt-get install python3-venv ffmpeg alsa-utils librubberband2 libsndfile1
+sudo apt-get install alsa-utils
 PREFIX="$HOME/.local" ./install.sh
 export PATH="$HOME/.local/bin:$PATH"
 codex_enikk
@@ -244,8 +240,7 @@ codex_enikk
 세션 연속성, 백업, transcript와 TUI는 계속 동작합니다.
 
 ```bash
-/usr/local/lib/codex_enikk/tts-venv/bin/python -c 'import supertonic; print(supertonic.__version__)'
-ffmpeg -hide_banner -filters 2>/dev/null | grep rubberband
+$HOME/Apps/chatterbox-yuki/.venv/bin/python -c 'import chatterbox, torch; print(torch.cuda.is_available())'
 command -v aplay
 tail -n 50 "$HOME/.local/state/codex_enikk/tts/notify.log"
 ```

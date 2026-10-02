@@ -29,7 +29,7 @@ JOBS = STATE / "jobs"
 # explicitly for another installation without duplicating it in the notifier).
 REFERENCE = Path(os.environ.get("CODEX_ENIKK_CHATTERBOX_REFERENCE", Path.home() / "Apps/chatterbox-yuki/yuki_super-clean.wav"))
 KOREAN_TECH = {
-    "SUPER-CLEAN": "슈퍼 클린", "Chatterbox": "채터박스", "Supertonic": "슈퍼토닉", "Codex": "코덱스",
+    "SUPER-CLEAN": "슈퍼 클린", "Chatterbox": "채터박스", "Codex": "코덱스",
     "GitHub": "깃허브", "Git": "깃", "Python": "파이썬", "Linux": "리눅스",
     "Ubuntu": "우분투", "CPU": "씨피유", "GPU": "지피유", "TTS": "티티에스",
     "API": "에이피아이", "JSON": "제이슨", "WAV": "웨이브",
@@ -333,7 +333,7 @@ def run():
                     if accepted is None:
                         model.prepare_conditionals(str(REFERENCE), exaggeration=0.50)
                         canonical_state = conditioning_state(model)
-                        log(f"Chatterbox chunk skipped job={item['id']} part={number} engine=chatterbox retries=2 skip=true supertonic_called=false state={canonical_state}")
+                        log(f"Chatterbox chunk skipped job={item['id']} part={number} engine=chatterbox retries=2 skip=true state={canonical_state}")
                         continue
                     wav, began, duration = accepted
                     state_after = conditioning_state(model)
@@ -355,4 +355,4 @@ if __name__ == "__main__":
         pass
     except Exception as exc:
         STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
-        log(f"Chatterbox failed: {type(exc).__name__}; Supertonic disabled")
+        log(f"Chatterbox failed: {type(exc).__name__}; alternate TTS disabled")
