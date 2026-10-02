@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Local Codex continuity wrapper. Python standard library only."""
 import io
+import hashlib
 import ctypes
 import signal
 import time
 import fcntl
 import errno
 import socket
+import sqlite3
 from contextlib import contextmanager
 import json
 import os
@@ -20,6 +22,7 @@ import tempfile
 import threading
 from datetime import datetime, timezone
 from latest import Mirror
+from persistence import DATABASES, snapshots, validate_database, validate_rollouts
 
 VERSION = '2.1.7'
 LATEST_TRANSCRIPT_FILE = None
@@ -142,34 +145,63 @@ def backup():
     fd, temporary = tempfile.mkstemp(prefix='.incomplete-', dir=target)
     result = target / f'codex-enikk-{stamp}.tar.gz'
     try:
-        paths = []
-        for folder in ('sessions', 'archived_sessions'):
-            root = source / folder
-            if root.is_symlink():
-                raise OSError(f'심볼릭 링크 세션 폴더는 백업할 수 없습니다: {root}')
-            if root.exists():
-                paths.extend(root.rglob('*.jsonl'))
-        paths.extend(source / name for name in ('history.jsonl', 'session_index.jsonl', 'enikk-continuity.json'))
-        manifest = {'version': VERSION, 'created_utc': stamp, 'files': [],
-                    'scope': 'session JSONL and history; not a filesystem snapshot'}
-        with os.fdopen(fd, 'wb') as raw, tarfile.open(fileobj=raw, mode='w:gz') as archive:
+        with tempfile.TemporaryDirectory(prefix='.sqlite-', dir=target) as directory:
+            stage = Path(directory)
+            timings = snapshots(source, stage)
+            paths = []
+            for folder in ('sessions', 'archived_sessions'):
+                root = source / folder
+                if root.is_symlink():
+                    raise OSError(f'심볼릭 링크 세션 폴더는 백업할 수 없습니다: {root}')
+                if root.exists():
+                    paths.extend(root.rglob('*.jsonl'))
+            paths.extend(source / name for name in ('history.jsonl', 'session_index.jsonl', 'enikk-continuity.json'))
+            version = None
+            if timings:
+                try:
+                    process = subprocess.run(['codex', '--version'], stdin=subprocess.DEVNULL,
+                                             capture_output=True, text=True, timeout=3)
+                    if process.returncode == 0:
+                        version = process.stdout.strip()
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+            manifest = {'version': VERSION, 'format_version': 2, 'codex_cli_version': version,
+                        'created_utc': stamp, 'source_codex_home': str(source), 'files': [],
+                        'sha256': {}, 'components': [],
+                        'sqlite_snapshot_seconds': timings,
+                        'scope': 'conversation files and SQLite snapshots; not a filesystem snapshot',
+                        'consistency': 'per-database live snapshot; close Codex for a cross-file point-in-time backup'}
+            entries = []
             for path in sorted(set(paths)):
                 if not path.exists():
                     continue
                 if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(source):
                     raise OSError(f'백업 범위 밖 경로: {path}')
-                data = path.read_bytes()
-                name = 'codex/' + path.relative_to(source).as_posix()
-                info = tarfile.TarInfo(name)
-                info.size, info.mode, info.mtime = len(data), 0o600, int(path.stat().st_mtime)
+                entries.append(('codex/' + path.relative_to(source).as_posix(), path))
+            entries.extend(('codex/' + name, stage / name) for name in timings)
+            manifest['components'] = sorted({Path(name).parts[1] for name, _ in entries})
+            sizes = {}
+            with os.fdopen(fd, 'wb') as raw, tarfile.open(fileobj=raw, mode='w:gz') as archive:
+                fd = None
+                for name, path in entries:
+                    data = path.read_bytes()
+                    info = tarfile.TarInfo(name)
+                    info.size, info.mode, info.mtime = len(data), 0o600, int(path.stat().st_mtime)
+                    archive.addfile(info, io.BytesIO(data))
+                    sizes[name] = len(data)
+                    manifest['files'].append(name)
+                    manifest['sha256'][name] = hashlib.sha256(data).hexdigest()
+                validate_rollouts(stage, source, sizes)
+                data = json.dumps(manifest, ensure_ascii=False, indent=2).encode()
+                info = tarfile.TarInfo('manifest.json')
+                info.size, info.mode = len(data), 0o600
                 archive.addfile(info, io.BytesIO(data))
-                manifest['files'].append(name)
-            data = json.dumps(manifest, ensure_ascii=False, indent=2).encode()
-            info = tarfile.TarInfo('manifest.json')
-            info.size, info.mode = len(data), 0o600
-            archive.addfile(info, io.BytesIO(data))
-        os.replace(temporary, result)
+            # Never replace an existing backup, even if a clock repeats a timestamp.
+            os.link(temporary, result)
+            Path(temporary).unlink()
     except BaseException:
+        if fd is not None:
+            os.close(fd)
         Path(temporary).unlink(missing_ok=True)
         raise
     print(f'세션 백업: {result}', flush=True)
@@ -177,41 +209,88 @@ def backup():
 
 
 def restore(archive_path):
-    """Restore missing files only, preserving existing conversations and archives."""
+    """Preflight all data; SQLite restores require an empty persistence store."""
     source = codex_home()
     private_dir(source)
     restored = skipped = 0
-    with tarfile.open(archive_path, 'r:gz') as archive:
-        members = archive.getmembers()
-        # Validate every entry before writing anything. Never extractall().
-        for item in members:
-            if item.name == 'manifest.json' and item.isfile():
-                continue
-            parts = Path(item.name).parts
-            allowed = (len(parts) == 2 and parts[1] in ('history.jsonl', 'session_index.jsonl', 'enikk-continuity.json')) or (
-                len(parts) >= 3 and parts[1] in ('sessions', 'archived_sessions') and item.name.endswith('.jsonl'))
-            if not item.isfile() or not parts or parts[0] != 'codex' or '..' in parts or not allowed:
-                raise ValueError(f'허용되지 않은 백업 항목: {item.name}')
-            destination = source.joinpath(*parts[1:])
-            if not destination.resolve().is_relative_to(source) or any(p.is_symlink() for p in [destination, *destination.parents] if p != source):
-                raise ValueError(f'복구 경로에 심볼릭 링크가 있습니다: {item.name}')
-        for item in members:
-            if item.name == 'manifest.json':
-                continue
-            destination = source.joinpath(*Path(item.name).parts[1:])
-            destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            try:
-                fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            except FileExistsError:
-                skipped += 1
-                continue
-            try:
-                with os.fdopen(fd, 'wb') as out, archive.extractfile(item) as src:
-                    shutil.copyfileobj(src, out)
-            except BaseException:
-                destination.unlink(missing_ok=True)
-                raise
-            restored += 1
+    with tempfile.TemporaryDirectory(prefix='.restore-', dir=source.parent) as directory:
+        stage = Path(directory)
+        with tarfile.open(archive_path, 'r:gz') as archive:
+            members = archive.getmembers()
+            names = [item.name for item in members]
+            if len(names) != len(set(names)):
+                raise ValueError('중복된 백업 항목입니다.')
+            manifest = {}
+            if 'manifest.json' in names:
+                item = archive.getmember('manifest.json')
+                if not item.isfile():
+                    raise ValueError('잘못된 manifest입니다.')
+                manifest = json.load(archive.extractfile(item))
+                if not isinstance(manifest, dict):
+                    raise ValueError('잘못된 manifest입니다.')
+            modern = manifest.get('format_version') == 2
+            has_sqlite = any(name == 'codex/' + db for name in names for db in DATABASES)
+            if has_sqlite and not modern:
+                raise ValueError('SQLite 복구에는 검증 가능한 format 2 manifest가 필요합니다.')
+            if has_sqlite and any((source / (db + suffix)).exists() or (source / (db + suffix)).is_symlink()
+                                  for db in DATABASES for suffix in ('', '-wal', '-shm', '-journal')):
+                raise ValueError('기존 SQLite가 있습니다. 덮어쓰기/병합하지 않습니다. 빈 CODEX_HOME에 복구하세요.')
+            payloads = set(names) - {'manifest.json'}
+            if modern and (set(manifest.get('files', [])) != payloads or
+                           set(manifest.get('sha256', {})) != payloads):
+                raise ValueError('백업 manifest와 파일 목록이 일치하지 않습니다.')
+            for item in members:
+                if item.name == 'manifest.json':
+                    continue
+                parts = Path(item.name).parts
+                allowed = (len(parts) == 2 and parts[1] in (
+                    'history.jsonl', 'session_index.jsonl', 'enikk-continuity.json', *DATABASES)) or (
+                    len(parts) >= 3 and parts[1] in ('sessions', 'archived_sessions') and item.name.endswith('.jsonl'))
+                if not item.isfile() or not parts or parts[0] != 'codex' or '..' in parts or not allowed:
+                    raise ValueError(f'허용되지 않은 백업 항목: {item.name}')
+                destination = source.joinpath(*parts[1:])
+                if has_sqlite and destination.exists():
+                    raise ValueError('SQLite 복구 대상에 기존 대화 파일이 있습니다. 빈 CODEX_HOME을 사용하세요.')
+                if not destination.resolve().is_relative_to(source) or any(
+                        p.is_symlink() for p in [destination, *destination.parents] if p != source):
+                    raise ValueError(f'복구 경로에 심볼릭 링크가 있습니다: {item.name}')
+                staged = stage.joinpath(*parts[1:])
+                staged.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                digest = hashlib.sha256()
+                with archive.extractfile(item) as incoming, staged.open('xb') as out:
+                    while chunk := incoming.read(1024 * 1024):
+                        digest.update(chunk)
+                        out.write(chunk)
+                staged.chmod(0o600)
+                if staged.stat().st_size != item.size or (modern and digest.hexdigest() != manifest['sha256'][item.name]):
+                    raise ValueError(f'손상된 백업 항목: {item.name}')
+            # Consume the gzip trailer too, before installing any restored files.
+            while archive.fileobj.read(1024 * 1024):
+                pass
+            for name in DATABASES:
+                if (stage / name).exists():
+                    validate_database(stage / name)
+            if has_sqlite:
+                original = Path(manifest.get('source_codex_home', ''))
+                if not original.is_absolute():
+                    raise ValueError('원본 CODEX_HOME 경로가 올바르지 않습니다.')
+                validate_rollouts(stage, original, {m.name: m.size for m in members}, relocate_to=source)
+            # No writes into CODEX_HOME until every entry and DB has passed validation.
+            for item in members:
+                if item.name == 'manifest.json':
+                    continue
+                relative = Path(*Path(item.name).parts[1:])
+                destination = source / relative
+                destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                try:
+                    # Same-filesystem atomic publish; existing files are never replaced.
+                    os.link(stage / relative, destination)
+                except FileExistsError:
+                    if has_sqlite:
+                        raise ValueError('복구 중 대상 파일이 생성됐습니다. Codex를 종료하고 빈 경로에서 다시 복구하세요.')
+                    skipped += 1
+                    continue
+                restored += 1
     print(f'복구: {restored}개, 기존 파일 유지: {skipped}개')
     return restored
 
@@ -786,6 +865,6 @@ def main(args=None):
 if __name__ == '__main__':
     try:
         sys.exit(main())
-    except (OSError, ValueError, tarfile.TarError, KeyboardInterrupt) as error:
+    except (OSError, ValueError, tarfile.TarError, sqlite3.Error, KeyboardInterrupt) as error:
         print(f'codex_enikk: {error}', file=sys.stderr)
         sys.exit(1)

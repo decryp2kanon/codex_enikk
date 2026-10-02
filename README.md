@@ -93,6 +93,12 @@ transcript에 identity를 복제하거나 별도의 LLM 호출을 하지 않습�
 - 시작 전과 정상 종료 시 `backups/`에 날짜별 `.tar.gz`를 생성합니다. 자동 삭제하지 않습니다.
 - `$CODEX_HOME`(기본 `~/.codex`)의 `sessions/`, `archived_sessions/` 아래 JSONL,
   `history.jsonl`, `session_index.jsonl`, `enikk-continuity.json`을 저장합니다.
+- Codex 0.158.0의 `state_5.sqlite`와 `thread_history_1.sqlite`도 있으면 포함합니다.
+  Python SQLite backup API로 committed WAL까지 snapshot을 만들며, 실행 중 DB 본체를 단순 복사하지 않습니다.
+  스레드 이름·분기 이력·대화 및 DB 내부 attachment metadata를 보존합니다.
+  로그·queue·모델/cache·goals/memories DB·외부 첨부 파일·프로젝트 파일은 포함하지 않습니다.
+- format 2 manifest에 CLI 버전, 원본 CODEX_HOME, 포함 파일, SHA-256 및 snapshot 시간을 기록합니다.
+  복원 전에 archive 전체와 SQLite 무결성·rollout 참조를 검증합니다.
 - 연결된 세션의 사용자·어시스턴트 텍스트를 약 2초마다 `transcripts/`에 저장합니다.
 - TXT는 파일당 최대 **10 MB (10,000,000바이트)**로 분할합니다.
   파일명은 `codex-session-세션ID-part-000001.txt`, `...-000002.txt` 순서입니다.
@@ -116,22 +122,27 @@ python3 save_transcript.py --session SESSION_ID --once
 기존 앱이 구버전으로 실행 중이면 그 앱의 단일 TXT 저장도 종료 전까지 계속될 수 있습니다.
 지속적인 기본 적용은 `sudo bash ./update.sh` 후 앱을 다시 실행하세요.
 
-Codex와 앱을 종료한 뒤 누락된 파일을 복구하세요:
-
-```bash
-codex_enikk_restore /path/to/backup.tar.gz
-codex_enikk
-```
-
-복구는 기존 파일을 덮어쓰거나 합치지 않습니다. 연결 기록도 백업에 포함됩니다.
-기존 파일이 손상된 경우 별도 폴더에 먼저 복구해 확인할 수 있습니다:
+Codex와 앱을 종료한 뒤 **빈 CODEX_HOME**에 복구하세요:
 
 ```bash
 CODEX_HOME="$HOME/codex-recovered" codex_enikk_restore /path/to/backup.tar.gz
+# 이 CODEX_HOME에서 로그인/설정을 별도로 준비한 뒤 실행:
+CODEX_HOME="$HOME/codex-recovered" codex_enikk
 ```
 
+SQLite가 포함된 백업은 기존 SQLite/WAL 또는 겹치는 대화 파일이 있으면 쓰기 전에 거부합니다.
+DB를 덮어쓰거나 row를 병합하지 않습니다. 복원한 DB의 `threads.rollout_path`는 새 CODEX_HOME으로
+변경하므로 이전 원본 rollout에 쓰지 않습니다. 작업 폴더와 외부 프로젝트/첨부 파일 경로까지 이전하지는 않습니다.
+기존 JSONL-only 백업은 계속 지원하며, 종전처럼 누락 파일만 복구하고 기존 파일은 유지합니다.
+단, 0.158.0에서 JSONL-only 복원은 직접 대화를 재구성해도 스레드 이름이나 분기 이전 이력을
+완전히 보존하지 못할 수 있습니다. 현재 구현은 JSONL과 두 SQLite를 함께 보관합니다.
 별도 복구는 로그인·설정이나 기존 데이터베이스 병합을 제공하지 않습니다.
 이전 1.0.0 백업에는 연결 기록이 없습니다. 해당 백업 복구 후 처음 실행하면 최초 연결 규칙이 적용됩니다.
+
+실행 중 snapshot은 각 DB 내부에서 일관되지만 여러 DB와 JSONL 전체가 한 트랜잭션은 아닙니다.
+정확한 동일 시점의 전체 백업이 필요하면 **모든 Codex 쓰기 작업을 종료한 상태에서 백업**하세요.
+rollout 누락 또는 DB의 기록 위치가 JSONL 크기를 넘어가면 백업을 실패 처리하고 재시도를 요구합니다.
+복원은 항상 Codex 종료 상태에서 수행합니다. 생성 파일을 기존 archive 위에 덮어쓰지 않습니다.
 
 | 환경변수 | 기본값 |
 | --- | --- |

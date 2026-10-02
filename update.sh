@@ -36,7 +36,12 @@ trap cleanup EXIT
 if [[ -f "$lib/latest.py" ]]; then
     cp -a -- "$lib/latest.py" "$previous/latest.py"
 fi
-for file in README.md VERSION latest.py enikk.py; do
+for file in persistence.py restore.py; do
+    if [[ -f "$lib/$file" ]]; then
+        cp -a -- "$lib/$file" "$previous/$file"
+    fi
+done
+for file in README.md VERSION latest.py persistence.py restore.py enikk.py; do
     temporary="$(mktemp "$lib/.$file.XXXXXXXX")"
     install -m 644 -- "$source_dir/$file" "$temporary"
     mv -f -- "$temporary" "$lib/$file"
