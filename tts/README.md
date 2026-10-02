@@ -32,9 +32,17 @@ Playback acknowledgements are saved atomically per chunk. Jobs are removed only 
 chunks are PLAYED. Playback errors are isolated to the item and do not stop the consumer.
 Jobs containing explicit failures are retained as `.failed-*` files in the TTS state `jobs/`
 directory, including the original message, chunk text, and failure reasons. They are parked
-for explicit recovery, not automatically retried forever. On restart, interrupted ordinary
-jobs resume chunks without saved terminal acknowledgements. A crash after audible playback
-but before its acknowledgement can replay that chunk; acknowledged chunks are not replayed.
+as diagnostics, not automatically retried forever. Each wrapper launch creates a private
+`runs/run-*` namespace for jobs, receipts and stream outboxes. A new launch never imports
+old-run jobs, including unfinished generations, failed jobs or an interrupted old turn.
+Within the same live run, a worker restart can resume unacknowledged chunks; a crash between
+audible playback and acknowledgement can still repeat that chunk in that same run.
+
+Normal exit marks the run cancelled. A worker watchdog validates its owner's PID and process
+start time; owner death or cancellation terminates the worker's private process group,
+including `aplay`. Startup cancels prior runs and stops their identity-checked worker groups.
+Old files remain for diagnosis but are excluded from all new-run delivery. One global model
+lock prevents simultaneous GPU models, while each run has its own launch lock.
 
 ## Sentence streaming (default for Codex 0.158.0)
 
@@ -44,10 +52,16 @@ for standalone `--no-daemon` and the completed-message watcher. Other
 Codex versions, missing dependencies, or startup failures use that existing path.
 Setup pins `websocket-client==1.9.0` in the existing Chatterbox venv. Install/update
 copy the helper; reference, existing venv and model cache are preserved.
+Startup reports `tts_mode=starting`, then `streaming` or `legacy_fallback` with a reason.
+The helper confirms model/reference readiness before the native streaming TUI opens; model
+loading is paid at startup rather than hidden behind the first submitted sentence. Startup
+is bounded, and readiness failure falls back to standalone Codex. Runtime mode is also saved
+in the current run's `runtime.log`; timings and subscription details are in `notify.log`.
 
 The private server owns the existing unrestricted permission policy because
 remote resume rejects CLI permission overrides. Its `notify=[]` override disables
 the global completed-answer hook; the JSONL watcher is not started in remote mode.
+Standalone fallback also overrides the global notify hook so only its scoped watcher submits.
 This gives each item one TTS owner without changing the user's global configuration.
 The helper observes the launch thread only; switching threads inside the TUI is
 not yet validated. Server/helper lifecycle is managed by the wrapper. A startup
@@ -145,6 +159,6 @@ recovery still apply to the resulting speech text.
 
 Stream checkpoints live in the existing TTS state's `streams/` directory.
 Completed stream jobs retain `.played-*` receipts; failed jobs retain `.failed-*`
-records under `jobs/`. These prevent outbox recovery from replaying acknowledged
+records under that run's `jobs/`. These prevent same-run outbox recovery from replaying acknowledged
 jobs. They contain visible spoken text and are private runtime state, never
 repository assets. Retention/pruning is not automated.

@@ -102,7 +102,8 @@ class Accumulator:
         self.submit = submit
         self.log = log
         self.items = {}
-        self.baseline = None
+        baseline = self.directory / '.baseline'
+        self.baseline = set(json.loads(baseline.read_text()).get('ignored_turns', [])) if baseline.exists() else set()
         self.reconcile_turns = set()
 
     def path(self, turn, item):
@@ -140,6 +141,7 @@ class Accumulator:
             if text and any(ch.isalnum() for ch in text):
                 key = hashlib.sha256(f"{self.thread_id}\0{state['turn']}\0{state['item']}\0{begin}\0{end}".encode()).hexdigest()
                 job = dict(id=key[:12], stream_key=key, text=text,
+                           run_id=os.environ.get('CODEX_ENIKK_TTS_RUN_ID'),
                            queued_ns=time.monotonic_ns(),
                            sentence_complete_ns=complete_ns,
                            filename=f'{time.time_ns():020d}-{key}',
@@ -177,6 +179,8 @@ class Accumulator:
         self.save(state)
 
     def snapshot(self, thread, initial=False, reconnecting=False):
+        if initial:
+            self.baseline.update(turn['id'] for turn in thread.get('turns', []))
         # Active items may be absent from thread/resume until item completion.
         # Deltas have no offsets: appending across a disconnected interval would
         # silently splice unrelated words. Reconcile that turn from full items.
@@ -191,6 +195,8 @@ class Accumulator:
                     state['needs_snapshot'] = True
                     self.save(state)
         for turn in thread.get('turns', []):
+            if not initial and turn['id'] in self.baseline:
+                continue
             for item in turn.get('items', []):
                 self.snapshot_item(turn['id'], item, turn.get('status'), baseline=initial)
         # Completed states remain on disk, not in an ever-growing memory cache.
@@ -201,6 +207,10 @@ class Accumulator:
         p = event.get('params', {})
         if p.get('threadId') != self.thread_id:
             return
+        if p.get('turnId', p.get('turn', {}).get('id')) in self.baseline:
+            return
+        if method == 'turn/started':
+            self.log(f"RESPONSE_START turn={p['turn']['id']} monotonic_ns={time.monotonic_ns()}")
         if method in ('item/started', 'item/completed'):
             item = p['item']
             if item.get('type') != 'agentMessage':
@@ -209,6 +219,7 @@ class Accumulator:
             if method == 'item/started':
                 state['phase'] = item.get('phase')
                 return
+            self.log(f"ITEM_COMPLETED item={item['id']} monotonic_ns={time.monotonic_ns()}")
             self.snapshot_item(p['turnId'], item, 'item_completed')
         elif method == 'item/agentMessage/delta':
             state = self.state(p['turnId'], p['itemId'])
@@ -219,10 +230,13 @@ class Accumulator:
                     state['needs_snapshot'] = True
                     self.save(state)
                 return
+            if not state['text']:
+                self.log(f"FIRST_DELTA_RECEIVED item={p['itemId']} monotonic_ns={time.monotonic_ns()}")
             state['text'] += p['delta']
             self.emit(state)
         elif method == 'turn/completed':
             turn = p['turn']
+            self.log(f"FINAL_COMPLETED turn={turn['id']} monotonic_ns={time.monotonic_ns()}")
             for key, state in list(self.items.items()):
                 if key[0] == turn['id'] and turn['status'] != 'completed':
                     state['interrupted'] = True
@@ -249,6 +263,12 @@ class Publisher:
         self.start_engine = start_engine
 
     def __call__(self, job):
+        if not notify.run_active():
+            return
+        current_run = os.environ.get('CODEX_ENIKK_TTS_RUN_ID')
+        if current_run and job.get('run_id') != current_run:
+            notify.log_status(f"stale job blocked job={job['id']} run_id={job.get('run_id')}")
+            return
         path = self.jobs / job['filename']
         # The engine archives stream delivery receipts before removing queue entries.
         if path.exists() or path.with_name('.played-' + path.name).exists() or path.with_name('.failed-' + path.name).exists():
@@ -307,10 +327,12 @@ def observe(endpoint, thread_id, directory, ready=None, submit=None, stop=None):
                     accumulator.snapshot(e['result']['thread'], initial=initial, reconnecting=not initial)
                     break
             if initial:
-                atomic_json(Path(directory) / '.baseline', {'initialized': True})
+                atomic_json(Path(directory) / '.baseline', {'initialized': True, 'ignored_turns': sorted(accumulator.baseline)})
             initial = False
             if ready:
-                atomic_json(Path(ready), dict(thread=thread_id, ready=True))
+                atomic_json(Path(ready), dict(thread=thread_id, ready=True,
+                            run_id=os.environ.get('CODEX_ENIKK_TTS_RUN_ID'), state=str(notify.STATE)))
+                notify.log_status(f"stream_ready thread={thread_id} run_id={os.environ.get('CODEX_ENIKK_TTS_RUN_ID')}")
             import websocket
             ws.settimeout(.5)
             while stop is None or not stop.is_set():
@@ -357,7 +379,19 @@ def main():
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     with (directory / '.lock').open('a+b') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        # Load once while the native TUI starts, not after the first sentence.
+        notify.ensure_engine()
+        deadline = time.monotonic() + 25
+        while not notify.engine_ready():
+            if not notify.run_active() or time.monotonic() >= deadline:
+                raise RuntimeError('Chatterbox worker readiness timeout')
+            time.sleep(.05)
         stop = threading.Event()
+        def monitor_owner():
+            while not stop.wait(.1):
+                if not notify.run_active():
+                    stop.set()
+        threading.Thread(target=monitor_owner, daemon=True).start()
         signal.signal(signal.SIGTERM, lambda *_: stop.set())
         signal.signal(signal.SIGINT, lambda *_: stop.set())
         observe(args.socket, args.thread, directory, args.ready, stop=stop)

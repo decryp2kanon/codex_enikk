@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import queue
 import re
+import signal
 import subprocess
 import tempfile
 import threading
@@ -469,13 +470,50 @@ def playback(ready):
             ready.task_done()
 
 
+def owner_alive(owner):
+    try:
+        pid, born = owner.split(':')
+        fields = Path(f'/proc/{int(pid)}/stat').read_text().rsplit(')', 1)[1].split()
+        return fields[0] not in ('Z', 'X') and fields[19] == born
+    except (OSError, ValueError, IndexError):
+        return False
+
+
+def discard_stale_job(path, item):
+    current_run = os.environ.get('CODEX_ENIKK_TTS_RUN_ID')
+    if current_run and item.get('run_id') != current_run:
+        path.rename(path.with_name('.stale-' + path.name))
+        log(f"Chatterbox stale_discard job={item.get('id')} run_id={item.get('run_id')}")
+        return True
+    return False
+
+
+def watch_owner(owner):
+    while owner_alive(owner) and not (STATE / 'cancelled').exists():
+        time.sleep(.1)
+    # ensure_engine starts a private session; its group contains only this worker
+    # and its aplay child. Kill both, including playback after a wrapper crash.
+    if os.getpgrp() == os.getpid():
+        os.killpg(os.getpgrp(), signal.SIGTERM)
+    else:
+        os.kill(os.getpid(), signal.SIGTERM)
+
+
 def run():
     STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
     JOBS.mkdir(mode=0o700, parents=True, exist_ok=True)
     if not REFERENCE.is_file():
         raise FileNotFoundError(REFERENCE)
-    with (STATE / "engine.lock").open("a+b") as lock:
+    with (STATE / "engine.lock").open("a+b") as lock, Path(os.environ.get('CODEX_ENIKK_TTS_MODEL_LOCK', STATE / 'model.lock')).open('a+b') as model_lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        owner = os.environ.get('CODEX_ENIKK_TTS_OWNER')
+        if owner:
+            (STATE / 'worker.json').write_text(json.dumps({'pid': os.getpid(),
+                'born': Path('/proc/self/stat').read_text().rsplit(')', 1)[1].split()[19]}))
+            threading.Thread(target=watch_owner, args=(owner,), daemon=True).start()
+        # Per-run launch lock above; one model across all run namespaces below.
+        log(f"Chatterbox waiting_model_lock run_id={os.environ.get('CODEX_ENIKK_TTS_RUN_ID')}")
+        fcntl.flock(model_lock, fcntl.LOCK_EX)
         started = time.monotonic()
         device = "cuda" if torch.cuda.is_available() else "cpu"
         log(f"loading Chatterbox multilingual model on {device}; first run may download model files")
@@ -483,6 +521,10 @@ def run():
         model.prepare_conditionals(str(REFERENCE), exaggeration=0.50)
         canonical_state = conditioning_state(model)
         log(f"Chatterbox C2 ready load_time={time.monotonic()-started:.3f}s reference={REFERENCE} state={canonical_state}")
+        ready_info = {'pid': os.getpid(), 'born': Path('/proc/self/stat').read_text().rsplit(')', 1)[1].split()[19],
+                      'run_id': os.environ.get('CODEX_ENIKK_TTS_RUN_ID')}
+        (STATE / 'model-ready.tmp').write_text(json.dumps(ready_info))
+        os.replace(STATE / 'model-ready.tmp', STATE / 'model-ready.json')
         ready = queue.Queue()
         threading.Thread(target=playback, args=(ready,), daemon=True).start()
         in_flight = {}
@@ -492,6 +534,8 @@ def run():
                 if path in in_flight or not path.is_file() or path.name.startswith("."):
                     continue
                 item = json.loads(path.read_text(encoding="utf-8"))
+                if discard_stale_job(path, item):
+                    continue
                 log(f"Chatterbox job_visible job={item['id']} monotonic_ns={time.monotonic_ns()}")
                 preprocessing = time.monotonic()
                 spoken_text, path_records = normalize_paths(item["text"])

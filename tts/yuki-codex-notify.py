@@ -45,7 +45,21 @@ def log_status(message):
         stream.write(f"{datetime.now().isoformat(timespec='seconds')} {message}\n")
 
 
+def run_active():
+    owner = os.environ.get('CODEX_ENIKK_TTS_OWNER')
+    if not owner:
+        return True
+    try:
+        pid, born = owner.split(':')
+        fields = Path(f'/proc/{int(pid)}/stat').read_text().rsplit(')', 1)[1].split()
+        return fields[0] not in ('Z', 'X') and fields[19] == born and not (STATE / 'cancelled').exists()
+    except (OSError, ValueError, IndexError):
+        return False
+
+
 def ensure_engine():
+    if not run_active():
+        return
     with (STATE / "engine.lock").open("a+b") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -67,7 +81,19 @@ def ensure_engine():
                          start_new_session=True, close_fds=True)
 
 
+def engine_ready():
+    try:
+        ready = json.loads((STATE / 'model-ready.json').read_text())
+        fields = Path(f"/proc/{int(ready['pid'])}/stat").read_text().rsplit(')', 1)[1].split()
+        return (fields[0] not in ('Z', 'X') and fields[19] == ready['born']
+                and ready['run_id'] == os.environ.get('CODEX_ENIKK_TTS_RUN_ID'))
+    except (OSError, ValueError, KeyError, IndexError):
+        return False
+
+
 def handle_notification(payload):
+    if not run_active():
+        return False
     if payload.get("type") != "agent-turn-complete":
         return False
     session = payload.get("thread-id")
@@ -95,7 +121,8 @@ def handle_notification(payload):
     try:
         temporary = JOBS / f".{event_id}.tmp"
         with temporary.open("w", encoding="utf-8") as stream:
-            json.dump({"id": event_id[:12], "text": text, "queued_ns": time.monotonic_ns()}, stream)
+            json.dump({"id": event_id[:12], "text": text, "queued_ns": time.monotonic_ns(),
+                       "run_id": os.environ.get("CODEX_ENIKK_TTS_RUN_ID")}, stream)
         os.replace(temporary, job)
         ensure_engine()
         log_status(f"queued completed turn job={event_id[:12]} original_len={len(answer)} cleaned_len={len(text)}")

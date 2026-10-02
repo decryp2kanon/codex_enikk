@@ -56,9 +56,11 @@ def selected():
 
 
 def main():
+    notify.STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
+    notify.ensure_engine()
     current = None
     last_scan = 0.0
-    while True:
+    while notify.run_active():
         if time.monotonic() - last_scan > 2:
             last_scan = time.monotonic()
             try:

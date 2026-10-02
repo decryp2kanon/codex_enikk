@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import re
 from pathlib import Path
 import tempfile
@@ -13,6 +14,13 @@ stream = importlib.util.module_from_spec(spec); spec.loader.exec_module(stream)
 
 class StreamingTests(unittest.TestCase):
     def setUp(self):
+        environment = patch.dict(os.environ)
+        environment.start(); self.addCleanup(environment.stop)
+        for key in list(os.environ):
+            if key.startswith('CODEX_ENIKK_TTS_'):
+                os.environ.pop(key)
+        logger = patch.object(stream.notify, 'log_status')
+        logger.start(); self.addCleanup(logger.stop)
         self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name); self.jobs = []
         self.a = stream.Accumulator(self.root, 'thread', self.jobs.append)
@@ -49,7 +57,7 @@ class StreamingTests(unittest.TestCase):
         time.sleep(5)
         self.delta('세 번째 문장이 마지막이야.')
         self.assertEqual(len(self.jobs), 3)
-        flush = int(re.search(r'flush_ns=(\d+)', traces[0])[1]) / 1e9
+        flush = int(re.search(r'flush_ns=(\d+)', next(line for line in traces if 'SENTENCE_FLUSH' in line))[1]) / 1e9
         self.assertLess(flush, second)
         print(f'sentence isolation complete={complete:.6f} flush={flush:.6f} job_created={timestamps[0]:.6f} second_arrival={second:.6f}')
 
@@ -165,6 +173,35 @@ class StreamingTests(unittest.TestCase):
         recovered=stream.Accumulator(self.root,'thread',publisher)
         recovered.recover()
         self.assertFalse(path.exists())
+
+    def test_previous_run_outbox_is_never_published(self):
+        import os
+        publisher = stream.Publisher(self.root / 'new-run', start_engine=False)
+        with patch.object(stream.notify, 'log_status'), patch.dict(os.environ, {'CODEX_ENIKK_TTS_RUN_ID':'A'}):
+            self.delta('이전 실행 문장은 다시 읽지 않아.')
+        self.assertEqual(self.jobs[0]['run_id'], 'A')
+        with patch.object(stream.notify, 'log_status'), patch.dict(os.environ, {'CODEX_ENIKK_TTS_RUN_ID':'B'}):
+            publisher(self.jobs[0])
+        self.assertEqual(list(publisher.jobs.iterdir()), [])
+
+    def test_previous_run_active_turn_cannot_resume_speaking(self):
+        self.a.snapshot({'turns':[{'id':'turn','status':'inProgress','items':[]}]}, initial=True)
+        self.delta('지난 실행에서 생성하던 문장이 뒤늦게 도착했어.')
+        self.complete('지난 실행에서 생성하던 문장이 뒤늦게 도착했어.')
+        self.assertEqual(self.jobs, [])
+        self.a.snapshot({'turns':[{'id':'turn','status':'completed','items':[
+            {'id':'item','type':'agentMessage','phase':'final_answer','text':'지난 문장이야.'}]}]}, reconnecting=True)
+        self.assertEqual(self.jobs, [])
+
+    def test_readiness_requires_live_matching_worker_and_run(self):
+        import os
+        born = Path('/proc/self/stat').read_text().rsplit(')', 1)[1].split()[19]
+        path = self.root / 'model-ready.json'
+        with patch.object(stream.notify, 'STATE', self.root), patch.dict(os.environ, {'CODEX_ENIKK_TTS_RUN_ID':'B'}):
+            self.assertFalse(stream.notify.engine_ready())
+            for run, birth, expected in [('A', born, False), ('B', '0', False), ('B', born, True)]:
+                path.write_text(json.dumps({'pid':os.getpid(), 'born':birth, 'run_id':run}))
+                self.assertEqual(stream.notify.engine_ready(), expected)
 
     def test_stream_recovery_delivery_receipt_and_final_duplicate(self):
         from test_tts_delivery import definitions

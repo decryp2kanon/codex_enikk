@@ -22,7 +22,8 @@ def definitions():
     tree = ast.parse(SOURCE.read_text())
     names = {'DeliveryJob', 'playback', 'run', 'GenerationWarnings',
              'sentences', 'speech_chunks', 'segment_drop_reason', 'recovery_clauses', 'recover_generation',
-             'normalize_paths', 'korean_pronunciation', 'normalize_numbers', 'korean_integer', 'korean_number'}
+             'normalize_paths', 'korean_pronunciation', 'normalize_numbers', 'korean_integer', 'korean_number',
+             'owner_alive', 'discard_stale_job'}
     constants = {'KOREAN_TECH', 'KOREAN_LETTERS', 'KOREAN_DIGITS', 'SINO_DIGITS', 'DECIMAL_DIGITS'}
     assignments = [node for node in tree.body if isinstance(node, ast.Assign)
                    and any(isinstance(target, ast.Name) and target.id in constants for target in node.targets)]
@@ -195,6 +196,11 @@ class RecoveryTests(unittest.TestCase):
 
 class DeliveryTests(unittest.TestCase):
     def setUp(self):
+        environment = patch.dict(os.environ)
+        environment.start(); self.addCleanup(environment.stop)
+        for key in list(os.environ):
+            if key.startswith('CODEX_ENIKK_TTS_'):
+                os.environ.pop(key)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
@@ -205,6 +211,22 @@ class DeliveryTests(unittest.TestCase):
         item = dict(id='test', text=' '.join(parts), queued_ns=time.monotonic_ns())
         path.write_text(json.dumps(item))
         return self.scope['DeliveryJob'](path, item, list(parts))
+
+    def test_stale_job_never_reaches_generation(self):
+        path = self.root / 'pending'; path.write_text('old content')
+        with patch.dict(os.environ, {'CODEX_ENIKK_TTS_RUN_ID':'B'}):
+            self.assertTrue(self.scope['discard_stale_job'](path, {'id':'old', 'run_id':'A'}))
+            self.assertFalse(path.exists())
+            self.assertEqual((self.root / '.stale-pending').read_text(), 'old content')
+            path.write_text('new content')
+            self.assertFalse(self.scope['discard_stale_job'](path, {'id':'new', 'run_id':'B'}))
+            self.assertTrue(path.exists())
+
+    def test_owner_identity_rejects_pid_reuse_and_dead_owner(self):
+        born = Path('/proc/self/stat').read_text().rsplit(')', 1)[1].split()[19]
+        self.assertTrue(self.scope['owner_alive'](f'{os.getpid()}:{born}'))
+        self.assertFalse(self.scope['owner_alive'](f'{os.getpid()}:0'))
+        self.assertFalse(self.scope['owner_alive']('999999999:0'))
 
     def test_partial_ack_survives_restart(self):
         job = self.job()

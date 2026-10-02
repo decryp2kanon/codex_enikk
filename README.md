@@ -279,6 +279,8 @@ private server, helper를 관리합니다. `CODEX_ENIKK_STREAMING_TTS=0`, 미지
 Codex 버전 또는 초기화 실패 시 기존 `--no-daemon`과 완료 메시지 TTS를 사용합니다.
 명확한 한국어 문장 종료는 다음 delta나 final을 기다리지 않고 독립 job으로
 즉시 전달합니다. 소수·도메인·경로처럼 불확실한 점은 lookahead 보호를 유지합니다.
+시작 시 모델 준비를 확인한 뒤 TUI를 열며, streaming 또는 fallback 상태와 이유를
+표시합니다. 실행마다 TTS queue를 분리하므로 종료·재시작 후 이전 대사는 자동 재생하지 않습니다.
 내부 long-tail 이중 실패에는 제한된 절 분할 복구를 적용합니다. 파일 경로는
 화면 원문을 보존하고 TTS에서만 파일명·확장자 중심 한국어 설명으로 변환합니다.
 내부 anomaly는 재생 전에 차단하며, 제한된 복구 후 정상 재생되면 성공으로

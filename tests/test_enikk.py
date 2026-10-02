@@ -43,6 +43,9 @@ class EnikkTests(unittest.TestCase):
         self.sessions = self.data / 'sessions'
         self.sessions.mkdir(parents=True)
         self.env = os.environ.copy()
+        for key in list(self.env):
+            if key.startswith('CODEX_ENIKK_TTS_'):
+                self.env.pop(key)
         self.env['CODEX_ENIKK_INSTALL_TTS'] = '0'
         self.env.update(HOME=str(self.home), CODEX_HOME=str(self.data),
                         CODEX_ENIKK_DATA_DIR=str(self.enikk_data))
@@ -110,7 +113,7 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
     def test_default_resume_backup_and_log(self):
         result = self.run_cli()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads((self.base / 'args.json').read_text()), ['resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox', '--no-daemon'])
+        self.assertEqual(json.loads((self.base / 'args.json').read_text()), ['resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox', '--no-daemon', '-c', 'notify=[]'])
         self.assertEqual(len(list((self.enikk_data / 'backups').glob('*.tar.gz'))), 2)
         self.assertIn('hello', (self.enikk_data / 'transcripts/codex-session-example-session-part-000001.txt').read_text())
         self.assertIn('Name: Enikk (에닉), exactly E-N-I-K-K.', (self.data / 'AGENTS.md').read_text())
@@ -131,14 +134,14 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
     def test_resume_alias_and_exit_code(self):
         result = self.run_cli('--resume', status=7)
         self.assertEqual(result.returncode, 7, result.stderr)
-        self.assertEqual(json.loads((self.base / 'args.json').read_text()), ['resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox', '--no-daemon'])
+        self.assertEqual(json.loads((self.base / 'args.json').read_text()), ['resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox', '--no-daemon', '-c', 'notify=[]'])
 
     def test_native_options_forwarded(self):
         args = ('--resume', '--yolo', '-m', 'chosen-model', '-i', '/tmp/photo with spaces.png', '--no-alt-screen')
         result = self.run_cli(*args)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads((self.base / 'args.json').read_text()),
-                         ['resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox', '--no-daemon',
+                         ['resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox', '--no-daemon', '-c', 'notify=[]',
                           '-m', 'chosen-model', '-i', '/tmp/photo with spaces.png', '--no-alt-screen'])
 
     def test_yolo_aliases_do_not_duplicate_flag_or_rewrite_literal_prompt(self):
@@ -146,7 +149,7 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
         result = self.run_cli('--yolo', flag, '--', '--yolo')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads((self.base / 'args.json').read_text()),
-                         ['resume', 'example-session', flag, '--no-daemon', '--', '--yolo'])
+                         ['resume', 'example-session', flag, '--no-daemon', '-c', 'notify=[]', '--', '--yolo'])
 
     def test_no_session_does_not_create_one(self):
         result = self.run_cli(seed=False)
@@ -270,7 +273,7 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                      stderr=subprocess.DEVNULL, close_fds=True),
                 call(['codex', 'resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox',
-                      '--no-daemon', '-i', 'picture.png'], close_fds=True),
+                      '--no-daemon', '-c', 'notify=[]', '-i', 'picture.png'], close_fds=True),
             ])
 
     def test_pty_is_passed_to_native_codex(self):
@@ -305,14 +308,56 @@ print('native terminal')
             with enikk.streaming_tts('session', Path('/python'), script) as endpoint:
                 self.assertIsNone(endpoint)
 
+    def test_new_run_never_reuses_pending_outbox_or_receipts(self):
+        base = self.base / 'tts'
+        with patch.dict(os.environ, {'CODEX_ENIKK_TTS_STATE': str(base)}):
+            with enikk.tts_run() as first:
+                (first / 'jobs').mkdir()
+                for number in range(10):
+                    (first / 'jobs' / str(number)).write_text('old pending')
+                (first / 'jobs/.played-old').write_text('receipt')
+                (first / 'streams').mkdir()
+                (first / 'streams/old.json').write_text('outbox')
+            self.assertTrue((first / 'cancelled').exists())
+            # Simulate a crash leaving the marker unwritten; startup still excludes it.
+            (first / 'cancelled').unlink()
+            with enikk.tts_run() as second:
+                self.assertNotEqual(first, second)
+                self.assertFalse((second / 'jobs').exists())
+                self.assertTrue((first / 'cancelled').exists())
+                self.assertIn('stale_jobs_excluded=10', (second / 'runtime.log').read_text())
+                self.assertEqual(os.environ['CODEX_ENIKK_TTS_MODEL_LOCK'], str(base / 'engine.lock'))
+            self.assertEqual(os.environ['CODEX_ENIKK_TTS_STATE'], str(base))
+
+    def test_disabled_streaming_reports_reason(self):
+        import io
+        from contextlib import redirect_stderr
+        capture = io.StringIO()
+        with patch.dict(os.environ, {'CODEX_ENIKK_STREAMING_TTS':'0'}), redirect_stderr(capture):
+            with enikk.streaming_tts('session', Path('/python'), Path('/missing')) as endpoint:
+                self.assertIsNone(endpoint)
+        self.assertIn('tts_mode=legacy_fallback reason=disabled', capture.getvalue())
+
+    def test_inherited_run_environment_keeps_global_model_lock(self):
+        base = self.base / 'tts'
+        with patch.dict(os.environ, {'CODEX_ENIKK_TTS_BASE_STATE': str(base),
+                                     'CODEX_ENIKK_TTS_STATE': str(base / 'runs/old')}):
+            with enikk.tts_run() as new:
+                self.assertEqual(new.parent, base / 'runs')
+                self.assertEqual(os.environ['CODEX_ENIKK_TTS_MODEL_LOCK'], str(base / 'engine.lock'))
+
     def test_stream_lifecycle_and_body_exception_cleanup(self):
         script = self.base / 'stream.py'; script.touch()
+        state = self.base / 'stream-state'; state.mkdir()
         result = subprocess.CompletedProcess([], 0, 'codex-cli 0.158.0\n', '')
         children = []
         def launch(args, **kwargs):
             from unittest.mock import Mock
             child = Mock(); child.poll.return_value = None
-            child.terminate.side_effect = lambda: setattr(child.poll, 'return_value', 0)
+            def terminate():
+                self.assertTrue((state / 'cancelled').exists())
+                child.poll.return_value = 0
+            child.terminate.side_effect = terminate
             children.append(child)
             self.assertTrue(kwargs['start_new_session'])
             if '--listen' in args:
@@ -322,7 +367,7 @@ print('native terminal')
             else:
                 Path(args[args.index('--ready')+1]).write_text('{}')
             return child
-        with patch.dict(os.environ), patch('enikk.subprocess.run', return_value=result), patch('enikk.subprocess.Popen', side_effect=launch):
+        with patch.dict(os.environ, {'CODEX_ENIKK_TTS_STATE':str(state), 'CODEX_ENIKK_TTS_OWNER':'test'}), patch('enikk.subprocess.run', return_value=result), patch('enikk.subprocess.Popen', side_effect=launch):
             os.environ.pop('CODEX_ENIKK_STREAMING_TTS', None)
             with self.assertRaisesRegex(RuntimeError, 'native body'):
                 with enikk.streaming_tts('session', Path('/python'), script) as endpoint:
