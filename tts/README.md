@@ -4,6 +4,15 @@ This optional integration speaks completed Codex commentary and final messages. 
 messages, reasoning, tool output, and raw logs. Supertonic 3 and the bundled custom style stay
 resident in one worker; synthesis and ordered playback use separate queues.
 
+Latin technical terms embedded in Korean are routed to `lang=en`; surrounding text remains
+`lang=ko`. Every segment uses the same custom style and fixed speed/post-processing settings.
+Segments enter the playback queue as soon as they are ready, preventing a complex mixed-language
+sentence from starving playback while the whole sentence is synthesized.
+
+Single newlines are spoken continuously. Blank lines receive a short paragraph pause. Model edge
+silence is trimmed and replaced with bounded pauses so WAV and `aplay` boundaries do not introduce
+long gaps.
+
 Runtime requirements:
 
 - Python 3.10+ with `supertonic`

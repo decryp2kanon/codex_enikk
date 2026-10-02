@@ -33,7 +33,9 @@ def clean_text(text):
         line = re.sub(r"^\s*(?:#{1,6}\s*|>\s*|[-*+]\s+|\d+[.)]\s+)", "", line)
         lines.append(line)
     text = "\n".join(lines).replace("**", "").replace("__", "")
-    return re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"[^\S\n]+", " ", text)
+    text = re.sub(r"\n(?:[ \t]*\n)+", "\n\n", text)
+    return text.strip()
 
 
 def log_status(message):
