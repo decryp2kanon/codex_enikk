@@ -65,7 +65,8 @@ codex_enikk --version
 
 같은 OS 사용자에서는 터미널·작업 폴더·`HOME`·`CODEX_HOME`·설치 경로가 달라도
 이 앱을 동시에 두 번 실행할 수 없습니다. 두 번째 실행은 기존 창을 사용하라는 안내와 함께 종료합니다.
-실행 잠금은 에닉만 보유하며 자식에게 상속하지 않습니다. `--no-daemon`으로 전용 Codex를 실행합니다.
+실행 잠금은 에닉만 보유하며 자식에게 상속하지 않습니다. 지원되는 버전은 전용
+app-server에 native TUI를 연결하며, streaming을 사용하지 못하면 `--no-daemon`으로 실행합니다.
 정상 종료 및 창 닫힘(SIGHUP)·SIGTERM 시 전용 자식/손자 프로세스를 종료하고 회수합니다.
 2초 안에 종료하지 않으면 SIGKILL을 보냅니다. 다른 Codex 창과 공유 서버는 종료하지 않습니다.
 SIGKILL·전원 차단처럼 정리 코드를 실행할 수 없는 종료는 예외입니다.
@@ -270,3 +271,17 @@ bash -n install.sh uninstall.sh codex_enikk codex_session_save.sh codex_enikk_re
 사용자 설치 및 `DESTDIR`를 이용한 전역 설치 구조·제거를 검사합니다.
 실제 로그인·서버 응답 및 데스크톱 클립보드는 자동 테스트 범위에 포함되지 않습니다.
 샌드박스에서 추상 소켓 bind가 금지되면 관련 테스트 3개는 사유를 표시하고 건너뜁니다.
+
+### 문장 단위 streaming TTS
+
+Codex 0.158.0에서는 app-server streaming이 기본입니다. wrapper가 native TUI,
+private server, helper를 관리합니다. `CODEX_ENIKK_STREAMING_TTS=0`, 미지원
+Codex 버전 또는 초기화 실패 시 기존 `--no-daemon`과 완료 메시지 TTS를 사용합니다.
+명확한 한국어 문장 종료는 다음 delta나 final을 기다리지 않고 독립 job으로
+즉시 전달합니다. 소수·도메인·경로처럼 불확실한 점은 lookahead 보호를 유지합니다.
+내부 long-tail 이중 실패에는 제한된 절 분할 복구를 적용합니다. 파일 경로는
+화면 원문을 보존하고 TTS에서만 파일명·확장자 중심 한국어 설명으로 변환합니다.
+내부 anomaly는 재생 전에 차단하며, 제한된 복구 후 정상 재생되면 성공으로
+계산합니다. 최종 실패·누락·중복·순서 오류는 성공으로 계산하지 않습니다.
+실패 내용은 보존되며, 자동 무한 재시도는 하지 않습니다. 상세 정책은
+[tts/README.md](tts/README.md)를 참고하세요.

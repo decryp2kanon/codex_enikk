@@ -45,6 +45,9 @@ if ! run_user "$chatterbox_home/.venv/bin/python" -c \
     'import importlib.metadata as m; assert m.version("chatterbox-tts") == "0.1.7"' 2>/dev/null; then
     run_user "$chatterbox_home/.venv/bin/python" -m pip install 'chatterbox-tts==0.1.7'
 fi
+if ! run_user "$chatterbox_home/.venv/bin/python" -c 'import websocket; import importlib.metadata as m; assert m.version("websocket-client") == "1.9.0"' 2>/dev/null; then
+    run_user "$chatterbox_home/.venv/bin/python" -m pip install 'websocket-client==1.9.0'
+fi
 run_user "$chatterbox_home/.venv/bin/python" - "$reference" <<'PY'
 import sys, torchaudio
 import chatterbox, perth, torch

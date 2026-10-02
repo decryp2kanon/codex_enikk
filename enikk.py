@@ -533,6 +533,72 @@ def owned_processes():
                 signal.signal(sig, handler)
 
 
+@contextmanager
+def streaming_tts(session_id, python, script):
+    """A private server per wrapper; fail back before attaching the native TUI."""
+    server = helper = None
+    # Opt out explicitly; unsupported CLI versions retain the standalone path.
+    if os.environ.get('CODEX_ENIKK_STREAMING_TTS', '1') == '0' or not script.is_file():
+        yield None
+        return
+    try:
+        version = subprocess.run(['codex', '--version'], capture_output=True, text=True, timeout=5)
+        dependency = subprocess.run([str(python), '-c', 'import websocket'],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+        supported = version.returncode == 0 and version.stdout.strip() == 'codex-cli 0.158.0' and dependency.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        supported = False
+    if not supported:
+        yield None
+        return
+    with tempfile.TemporaryDirectory(prefix='codex-enikk-stream-') as directory:
+        root = Path(directory)
+        endpoint = root / 'server.sock'
+        ready = root / 'ready.json'
+        with (root / 'server.log').open('wb') as log:
+            try:
+                endpoint_ready = None
+                try:
+                    server = subprocess.Popen(['codex', '-c', 'approval_policy="never"', '-c', 'sandbox_mode="danger-full-access"', '-c', 'notify=[]',
+                                               'app-server', '--listen', 'unix://' + str(endpoint)],
+                                              stdin=subprocess.DEVNULL, stdout=log, stderr=log, close_fds=True, start_new_session=True)
+                    deadline = time.monotonic() + 15
+                    while not endpoint.exists() and server.poll() is None and time.monotonic() < deadline:
+                        time.sleep(.05)
+                    if endpoint.exists():
+                        helper = subprocess.Popen([str(python), str(script), '--socket', str(endpoint),
+                                                   '--thread', session_id, '--ready', str(ready)],
+                                                  stdin=subprocess.DEVNULL, stdout=log, stderr=log, close_fds=True, start_new_session=True)
+                        while not ready.exists() and helper.poll() is None and server.poll() is None and time.monotonic() < deadline:
+                            time.sleep(.05)
+                    if ready.exists() and server.poll() is None and helper is not None and helper.poll() is None:
+                        endpoint_ready = 'unix://' + str(endpoint)
+                except (OSError, subprocess.SubprocessError) as exc:
+                    print(f'Streaming TTS 시작 오류: {type(exc).__name__}', file=sys.stderr)
+                if endpoint_ready is None:
+                    # Stop the candidate observer before starting the legacy watcher.
+                    for process in (helper, server):
+                        if process is not None and process.poll() is None:
+                            process.terminate()
+                            try:
+                                process.wait(timeout=3)
+                            except subprocess.TimeoutExpired:
+                                process.kill()
+                                process.wait()
+                    print('Streaming TTS 준비 실패: 기존 Codex 실행 경로를 사용합니다.', file=sys.stderr)
+                # Keep exceptions from the native TUI body out of startup fallback.
+                yield endpoint_ready
+            finally:
+                for process in (helper, server):
+                    if process is not None and process.poll() is None:
+                        process.terminate()
+                        try:
+                            process.wait(timeout=3)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait()
+
+
 def conversation(session_id, instance_fd, args=()):
     """Let the native TUI own the terminal, clipboard, slash commands and rendering."""
     yolo = '--dangerously-bypass-approvals-and-sandbox'
@@ -555,26 +621,30 @@ def conversation(session_id, instance_fd, args=()):
         tts_python = sys.executable
         tts_ready = (os.environ.get('CODEX_ENIKK_TTS', '1') != '0' and tts_script.is_file()
                      and chatterbox_python.is_file() and shutil.which('aplay'))
-        if tts_ready:
-            # TTS is optional: it follows completed user-facing Codex messages,
-            # while failures stay isolated from the native TUI.
-            subprocess.Popen([tts_python, str(tts_script)], stdin=subprocess.DEVNULL,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             close_fds=True)
-        # Never let descendants keep the wrapper's single-instance socket alive.
-        child = subprocess.Popen(command, close_fds=True)
-        try:
-            while True:
-                try:
-                    status = child.wait()
-                    return status if status >= 0 else 128 - status
-                except KeyboardInterrupt:
-                    # Codex receives Ctrl+C from the same foreground terminal.
-                    continue
-        finally:
-            # owned_processes handles the entire remaining tree on every exit path.
-            if child.poll() is not None:
-                child.wait()
+        stream_script = install_root / 'tts' / 'yuki-codex-stream.py'
+        from contextlib import nullcontext
+        context = streaming_tts(session_id, chatterbox_python, stream_script) if tts_ready else nullcontext(None)
+        with context as endpoint:
+            if endpoint:
+                # Remote resume rejects permission flags; the private server owns
+                # the same unrestricted policy as the existing standalone path.
+                command = ['codex', 'resume', session_id, '--remote', endpoint, *options]
+            elif tts_ready:
+                subprocess.Popen([tts_python, str(tts_script)], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 close_fds=True)
+            # The stream helper is the sole TTS owner in remote mode; no JSONL watcher.
+            child = subprocess.Popen(command, close_fds=True)
+            try:
+                while True:
+                    try:
+                        status = child.wait()
+                        return status if status >= 0 else 128 - status
+                    except KeyboardInterrupt:
+                        continue
+            finally:
+                if child.poll() is not None:
+                    child.wait()
 
 
 def main(args=None):

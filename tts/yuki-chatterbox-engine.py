@@ -102,6 +102,64 @@ def conditioning_state(model):
     return f"conds={id(conds)} speaker={id(speaker)} shape={tuple(speaker.shape)} mean={speaker.float().mean().item():.6f}"
 
 
+def normalize_paths(text):
+    """TTS-only filesystem descriptions, before splitting or number conversion.
+
+    Return explicit replacements as well as text; never mutate the source job.
+    URLs and ordinary slash expressions cannot start a match.
+    """
+    extensions = {
+        'py': '파이썬 파일', 'md': '마크다운 파일', 'sh': '셸 스크립트',
+        'json': '제이슨 파일', 'txt': '텍스트 파일', 'wav': '웨이브 오디오 파일',
+        'log': '로그 파일', 'toml': '톰엘 설정 파일', 'yaml': '야믈 설정 파일',
+        'yml': '야믈 설정 파일', 'cpp': '씨 플러스 플러스 소스 파일',
+        'cc': '씨 플러스 플러스 소스 파일', 'h': '헤더 파일', 'hpp': '헤더 파일',
+        'rs': '러스트 소스 파일', 'js': '자바스크립트 파일', 'ts': '타입스크립트 파일',
+    }
+    names = {'yuki': '유키', 'engine': '엔진', 'enikk': '에닉', 'readme': '리드미',
+             'install': '인스톨', 'license': '라이선스', 'changelog': '체인지로그',
+             'makefile': '메이크파일', 'test': '테스트', 'output': '아웃풋',
+             'approval': '승인', 'marker': '표시'}
+    # Delimited paths may contain Korean filenames. Attached Korean particles
+    # after a known extension are prose, not part of that filename.
+    pattern = re.compile(
+        r"(?<![\w/:.])(?P<path>`?(?:/(?:home|tmp|usr|etc|var|opt)/|~/|\.\.?/)[^\s`\"'<>()[\]{}]+`?)"
+        r"(?:\s+(?:파일|경로)(?P<particle>에서|으로|을|를|은|는|이|가|에|로)?(?=\s|[.!?,]|$))?")
+    records = []
+
+    def replace(match):
+        raw = match.group('path')
+        path = raw.strip('`')
+        tail = ''
+        while path and path[-1] in '.,!?:;':
+            tail = path[-1] + tail
+            path = path[:-1]
+        attached = re.search(r'\.(?:' + '|'.join(extensions) + r')(을|를|은|는|이|가|에서|에|로|으로)$', path, re.I)
+        if attached:
+            tail = attached.group(1) + tail
+            path = path[:-len(attached.group(1))]
+        basename = path.rstrip('/').rsplit('/', 1)[-1]
+        stem, dot, extension = basename.rpartition('.')
+        if not dot:
+            stem, extension = basename, ''
+        description = extensions.get(extension.lower(), '파일')
+        # Machine identifiers are intentionally described, not spelled out.
+        machine = (len(stem) > 48 or bool(re.fullmatch(r'[0-9a-fA-F-]{16,}', stem))
+                   or any(len(token) > 20 for token in re.split(r'[-_.]', stem)))
+        spoken = '' if machine else ' '.join(names.get(token.lower(), token)
+                                             for token in re.split(r'[-_.]+', stem) if token)
+        spoken = korean_pronunciation(spoken) if spoken else ''
+        result = ' '.join(filter(None, (spoken, description, '경로')))
+        tail += match.group('particle') or ''
+        tail = re.sub(r'^(을|이|은|으로)', lambda m: {'을': '를', '이': '가', '은': '는', '으로': '로'}[m[0]], tail)
+        records.append({'original': raw, 'description': result, 'span': match.span(),
+                        'replaced_text': match.group(0), 'spoken': result + tail})
+        return result + tail
+
+    normalized = pattern.sub(replace, text)
+    return normalized, records
+
+
 def sentences(text):
     # Newlines are presentation boundaries, not silent audio segments.
     text = re.sub(r"\s*\n+\s*", " ", text)
@@ -159,18 +217,82 @@ def speech_chunks(text, minimum=20, target=28, maximum=55):
     return chunks
 
 
+def recovery_clauses(text):
+    """One balanced word-boundary split; prefer punctuation or Korean clauses.
+
+    No punctuation is removed and no token is divided. This is used only after
+    two internal long-tail rejections, never on the ordinary scheduler path.
+    """
+    words = text.split()
+    choices = []
+    for index in range(1, len(words)):
+        left, right = " ".join(words[:index]), " ".join(words[index:])
+        # A complete long URL/filename stays one token. Permit a short
+        # two-word connective clause, but never a tiny single-word fragment.
+        if any(len(part) < (6 if len(part.split()) >= 2 else 8) for part in (left, right)):
+            continue
+        clause = bool(re.search(r"[,;:]$|(?:으며|면서|지만|며|하고|이고|하며|때문에)$", words[index - 1]))
+        choices.append((not clause, abs(len(left) - len(right)), index, left, right))
+    if not choices:
+        return []
+    _, _, _, left, right = min(choices)
+    parts = [left, right]
+    assert [word for part in parts for word in part.split()] == words
+    return parts
+
+
+def recover_generation(text, attempt, reset, join, trace):
+    """At most 2 original + 2 attempts per each of 2 depth-1 clauses.
+
+    Publish nothing until every clause succeeds. The original delivery index
+    owns one assembled WAV, so crash recovery and playback ordering stay intact.
+    """
+    def twice(segment, depth, clause):
+        reasons = []
+        for number in (1, 2):
+            payload, reason = attempt(segment, number, depth, clause)
+            if payload is not None:
+                return payload, reasons
+            reasons.append(reason)
+            reset()
+        return None, reasons
+
+    payload, reasons = twice(text, 0, 0)
+    if payload is not None:
+        return payload, None
+    # Exception / waveform failures retain their existing explicit failure policy.
+    parts = recovery_clauses(text) if reasons == ["internal_long_tail"] * 2 else []
+    if not parts:
+        return None, "; ".join(reasons)
+    trace(f"recovery_split depth=1 original_tokens={len(text.split())} clauses={parts!r} lost=0")
+    recovered = []
+    for index, part in enumerate(parts):
+        payload, failures = twice(part, 1, index)
+        if payload is None:
+            return None, f"recovery clause={index}: {'; '.join(failures)}"
+        recovered.append(payload)
+    trace("recovery_accepted depth=1 clauses=2 lost=0")
+    return join(recovered), None
+
+
 class GenerationWarnings(logging.Handler):
-    """Capture strong alignment failures that Chatterbox exposes only as logs."""
+    """Capture analyzer signals; token repetition alone remains informational."""
     def __init__(self):
         super().__init__()
         self.reason = None
+        self.signals = set()
 
     def emit(self, record):
         message = record.getMessage()
-        if "long_tail=tensor(True)" in message:
-            self.reason = "Chatterbox long-tail anomaly"
-        elif "alignment_repetition=tensor(True)" in message:
-            self.reason = "Chatterbox alignment-repetition anomaly"
+        for name in ("long_tail", "alignment_repetition", "token_repetition"):
+            if re.search(rf"{name}=(?:tensor\()?True\b", message):
+                self.signals.add(name)
+        if "forcing EOS" in message:
+            self.signals.add("forced_eos")
+        if "long_tail" in self.signals:
+            self.reason = "internal_long_tail"
+        elif "alignment_repetition" in self.signals:
+            self.reason = "internal_alignment_repetition"
 
 
 def trim_edge_silence(wav, sample_rate):
@@ -284,7 +406,11 @@ class DeliveryJob:
                 os.replace(self.path, failed_path)
                 log(f"Chatterbox job_failed job={self.item['id']} recoverable={failed_path}")
             else:
-                self.path.unlink(missing_ok=True)
+                if self.item.get("stream_key"):
+                    # Durable receipt prevents a stream outbox replay from speaking twice.
+                    os.replace(self.path, self.path.with_name(".played-" + self.path.name))
+                else:
+                    self.path.unlink(missing_ok=True)
                 log(f"Chatterbox job_cleanup job={self.item['id']} final=PLAYED")
             self._sync_directory()
             self.complete = True
@@ -312,7 +438,7 @@ def playback(ready):
         try:
             started = time.monotonic()
             gap = 0.0 if previous_end is None else max(0.0, started - previous_end)
-            log(f"Chatterbox playback start job={job_id} part={number} queue_wait={started-generated:.3f}s previous_gap={gap:.3f}s audio={audio_duration:.2f}s")
+            log(f"Chatterbox playback start job={job_id} part={number} queue_wait={started-generated:.3f}s previous_gap={gap:.3f}s audio={audio_duration:.2f}s monotonic={started:.6f}")
             if number == 0:
                 log(f"Chatterbox first audio latency {(time.monotonic_ns()-queued_ns)/1e9:.3f}s job={job_id}")
             subprocess.run(["/usr/bin/aplay", "-q", path], check=True,
@@ -329,7 +455,7 @@ def playback(ready):
             previous_end = time.monotonic()
             try:
                 job.finish(number, status, failure_reason)
-                log(f"Chatterbox playback done job={job_id} part={number} final={status}")
+                log(f"Chatterbox playback done job={job_id} part={number} final={status} monotonic={previous_end:.6f}")
             except Exception as exc:
                 # Keep the source job for restart recovery if acknowledgement fails.
                 try:
@@ -366,8 +492,18 @@ def run():
                 if path in in_flight or not path.is_file() or path.name.startswith("."):
                     continue
                 item = json.loads(path.read_text(encoding="utf-8"))
+                log(f"Chatterbox job_visible job={item['id']} monotonic_ns={time.monotonic_ns()}")
                 preprocessing = time.monotonic()
-                originals = speech_chunks(item["text"])
+                spoken_text, path_records = normalize_paths(item["text"])
+                for record in path_records:
+                    log(f"Chatterbox job={item['id']} PATH_NORMALIZED_EXPLICITLY original={record['original']!r} description={record['description']!r}")
+                if path_records:
+                    natural = item['text']
+                    for record in reversed(path_records):
+                        start, end = record['span']
+                        natural = natural[:start] + natural[end:]
+                    log(f"Chatterbox job={item['id']} path_accounting natural_text_tokens={len(natural.split())} path_tokens={len(path_records)} normalized_path_descriptions={len(path_records)}")
+                originals = speech_chunks(spoken_text)
                 candidates = [korean_pronunciation(part) for part in originals]
                 parts = []
                 for index, candidate in enumerate(candidates):
@@ -387,64 +523,64 @@ def run():
                         log(f"Chatterbox pre-generate drop job={item['id']} part={number} repr={sentence!r} reason={reason}")
                         job.finish(number, "formatting_skipped")
                         continue
-                    accepted = None
-                    last_failure = None
-                    for attempt in range(2):
-                        began = time.monotonic()
-                        log(f"Chatterbox generate start job={item['id']} part={number} attempt={attempt + 1} text_len={len(sentence)} text={sentence!r}")
-                        try:
-                            warnings = GenerationWarnings()
-                            anomaly_logger = logging.getLogger("chatterbox.models.t3.inference.alignment_stream_analyzer")
-                            anomaly_logger.addHandler(warnings)
-                            try:
-                                wav = model.generate(sentence, language_id="ko", exaggeration=0.50,
-                                                     cfg_weight=0.70).cpu()
-                            finally:
-                                anomaly_logger.removeHandler(warnings)
-                        except Exception as exc:
-                            last_failure = f"generate: {type(exc).__name__}: {exc}"
-                            log(f"Chatterbox generate error job={item['id']} part={number} attempt={attempt + 1} error={type(exc).__name__}")
-                            torch.cuda.empty_cache()
-                            model.prepare_conditionals(str(REFERENCE), exaggeration=0.50)
-                            canonical_state = conditioning_state(model)
-                            log(f"Chatterbox conditioning reset job={item['id']} part={number} state={canonical_state}")
-                            continue
-                        if warnings.reason:
-                            last_failure = warnings.reason
-                            log(f"Chatterbox generation anomaly job={item['id']} part={number} attempt={attempt + 1} reason={warnings.reason}")
-                            del wav
-                            torch.cuda.empty_cache()
-                            model.prepare_conditionals(str(REFERENCE), exaggeration=0.50)
-                            canonical_state = conditioning_state(model)
-                            log(f"Chatterbox conditioning reset job={item['id']} part={number} state={canonical_state}")
-                            continue
-                        wav, leading_silence, trailing_silence = trim_edge_silence(wav, model.sr)
-                        rejected, reason, duration = suspicious_audio(wav, model.sr, sentence)
-                        if rejected:
-                            last_failure = reason
-                            log(f"Chatterbox artifact rejected job={item['id']} part={number} attempt={attempt + 1} duration={duration:.2f}s reason={reason}")
-                            del wav
-                            torch.cuda.empty_cache()
-                            model.prepare_conditionals(str(REFERENCE), exaggeration=0.50)
-                            canonical_state = conditioning_state(model)
-                            log(f"Chatterbox conditioning reset job={item['id']} part={number} state={canonical_state}")
-                            continue
-                        accepted = (wav, began, duration)
-                        break
-                    if accepted is None:
+                    began = time.monotonic()
+                    def trace(message):
+                        log(f"Chatterbox job={item['id']} part={number} monotonic={time.monotonic():.6f} {message}")
+
+                    def reset():
+                        reset_start = time.monotonic()
+                        torch.cuda.empty_cache()
                         model.prepare_conditionals(str(REFERENCE), exaggeration=0.50)
-                        canonical_state = conditioning_state(model)
-                        log(f"Chatterbox chunk_failed job={item['id']} part={number} engine=chatterbox attempts=2 final=FAILED_EXPLICITLY reason={last_failure!r} state={canonical_state}")
+                        trace(f"conditioning_reset duration={time.monotonic()-reset_start:.6f}s reference={REFERENCE} state={conditioning_state(model)}")
+
+                    def attempt(segment, attempt_number, depth, clause):
+                        started = time.monotonic()
+                        trace(f"generate_start attempt={attempt_number} depth={depth} clause={clause} text_len={len(segment)} tokens={len(segment.split())} text={segment!r}")
+                        warnings = GenerationWarnings()
+                        anomaly_logger = logging.getLogger("chatterbox.models.t3.inference.alignment_stream_analyzer")
+                        anomaly_logger.addHandler(warnings)
+                        try:
+                            wav = model.generate(segment, language_id="ko", exaggeration=0.50,
+                                                 cfg_weight=0.70).cpu()
+                        except Exception as exc:
+                            reason = f"generate: {type(exc).__name__}: {exc}"
+                            trace(f"generate_rejected attempt={attempt_number} depth={depth} duration={time.monotonic()-started:.6f}s reason={reason!r}")
+                            return None, reason
+                        finally:
+                            anomaly_logger.removeHandler(warnings)
+                        raw_duration = wav.shape[-1] / model.sr
+                        wav, leading, trailing = trim_edge_silence(wav, model.sr)
+                        rejected, waveform_reason, duration = suspicious_audio(wav, model.sr, segment)
+                        reason = warnings.reason or (f"waveform: {waveform_reason}" if rejected else None)
+                        trace(f"generate_end attempt={attempt_number} depth={depth} clause={clause} duration={time.monotonic()-started:.6f}s raw_audio={raw_duration:.6f}s audio={duration:.6f}s sr={model.sr} leading={leading:.6f}s trailing={trailing:.6f}s seconds_per_char={duration/max(1,len(segment)):.6f} analyzer={sorted(warnings.signals)!r} waveform_rejected={rejected} waveform_reason={waveform_reason!r} reject_reason={reason!r}")
+                        if reason:
+                            # Opt-in bounded diagnostics outside the repository; never played.
+                            debug = os.environ.get("CODEX_ENIKK_TTS_REJECT_DIR")
+                            if debug:
+                                try:
+                                    directory = Path(debug)
+                                    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+                                    if len(list(directory.glob("*.wav"))) < 24:
+                                        torchaudio.save(str(directory / f"{item['id']}-{number}-{depth}-{clause}-{attempt_number}-{time.monotonic_ns()}.wav"), wav, model.sr)
+                                except Exception as exc:
+                                    trace(f"rejected_audio_diagnostic_failed error={type(exc).__name__}")
+                            return None, reason
+                        return (wav, duration), None
+
+                    accepted, last_failure = recover_generation(
+                        sentence, attempt, reset,
+                        lambda pieces: (torch.cat([piece[0] for piece in pieces], dim=-1),
+                                        sum(piece[1] for piece in pieces)), trace)
+                    if accepted is None:
+                        trace(f"chunk_failed engine=chatterbox final=FAILED_EXPLICITLY reason={last_failure!r}")
                         job.finish(number, "generation_failed", last_failure)
                         continue
-                    wav, began, duration = accepted
-                    state_after = conditioning_state(model)
-                    log(f"Chatterbox state job={item['id']} part={number} engine=chatterbox retry={attempt} reference={REFERENCE} before={canonical_state} after={state_after}")
+                    wav, duration = accepted
                     output = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
                     output.close()
                     torchaudio.save(output.name, wav, model.sr)
                     generated = time.monotonic()
-                    log(f"Chatterbox generate done job={item['id']} part={number} generation={generated-began:.3f}s audio={duration:.2f}s trimmed_leading={leading_silence:.3f}s trimmed_trailing={trailing_silence:.3f}s")
+                    log(f"Chatterbox generate done job={item['id']} part={number} generation={generated-began:.3f}s audio={duration:.2f}s")
                     ready.put((job, number, output.name, item["queued_ns"], generated, duration))
                     log(f"Chatterbox playback queued job={item['id']} part={number} final=queued")
             time.sleep(0.05)

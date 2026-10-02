@@ -259,7 +259,10 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
             pass
 
     def test_native_child_inherits_terminal_streams(self):
-        with patch('enikk.subprocess.Popen') as launch:
+        python = self.home / 'Apps/chatterbox-yuki/.venv/bin/python'
+        python.parent.mkdir(parents=True)
+        python.touch()
+        with patch.dict(os.environ, {'CODEX_ENIKK_STREAMING_TTS': '0'}), patch('enikk.shutil.which', return_value='/usr/bin/aplay'), patch('enikk.subprocess.Popen') as launch:
             launch.return_value.wait.return_value = 0
             self.assertEqual(enikk.conversation('example-session', 42, ['-i', 'picture.png']), 0)
             launch.assert_has_calls([
@@ -294,6 +297,43 @@ print('native terminal')
         finally:
             os.close(master)
             os.close(slave)
+
+    def test_stream_startup_failure_falls_back_without_raising(self):
+        script = self.base / 'stream.py'; script.touch()
+        result = subprocess.CompletedProcess([], 0, 'codex-cli 0.158.0\n', '')
+        with patch.dict(os.environ, {'CODEX_ENIKK_STREAMING_TTS':'1'}), patch('enikk.subprocess.run', return_value=result), patch('enikk.subprocess.Popen', side_effect=OSError('spawn failed')):
+            with enikk.streaming_tts('session', Path('/python'), script) as endpoint:
+                self.assertIsNone(endpoint)
+
+    def test_stream_lifecycle_and_body_exception_cleanup(self):
+        script = self.base / 'stream.py'; script.touch()
+        result = subprocess.CompletedProcess([], 0, 'codex-cli 0.158.0\n', '')
+        children = []
+        def launch(args, **kwargs):
+            from unittest.mock import Mock
+            child = Mock(); child.poll.return_value = None
+            child.terminate.side_effect = lambda: setattr(child.poll, 'return_value', 0)
+            children.append(child)
+            self.assertTrue(kwargs['start_new_session'])
+            if '--listen' in args:
+                self.assertIn('notify=[]', args)
+                self.assertIn('approval_policy="never"', args)
+                Path(args[-1].removeprefix('unix://')).touch()
+            else:
+                Path(args[args.index('--ready')+1]).write_text('{}')
+            return child
+        with patch.dict(os.environ), patch('enikk.subprocess.run', return_value=result), patch('enikk.subprocess.Popen', side_effect=launch):
+            os.environ.pop('CODEX_ENIKK_STREAMING_TTS', None)
+            with self.assertRaisesRegex(RuntimeError, 'native body'):
+                with enikk.streaming_tts('session', Path('/python'), script) as endpoint:
+                    self.assertTrue(endpoint.startswith('unix://'))
+                    directory = Path(endpoint.removeprefix('unix://')).parent
+                    raise RuntimeError('native body')
+        self.assertFalse(directory.exists())
+        self.assertEqual(len(children), 2)
+        for child in children:
+            child.terminate.assert_called_once()
+            child.wait.assert_called_once()
 
     def test_ctrl_c_is_left_to_native_child(self):
         with patch('enikk.subprocess.Popen') as launch:
@@ -585,6 +625,7 @@ while True: time.sleep(1)
                 prefix = Path(env['DESTDIR'] + env['PREFIX'])
                 result = subprocess.run([str(ROOT / 'install.sh')], env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual((prefix / 'lib/codex_enikk/tts/yuki-codex-stream.py').read_bytes(), (ROOT / 'tts/yuki-codex-stream.py').read_bytes())
                 for name in ('codex_enikk', 'codex_session_save.sh'):
                     result = subprocess.run([str(prefix / 'bin' / name), '--version'], env=env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
@@ -623,10 +664,19 @@ while True: time.sleep(1)
         self.assertEqual((previous[0] / 'enikk.py').read_text(), 'print("old version")\n')
         self.assertEqual((lib / 'enikk.py').read_bytes(), (ROOT / 'enikk.py').read_bytes())
         self.assertEqual(session.read_bytes(), original)
+        self.assertEqual((lib / 'tts/yuki-codex-stream.py').read_bytes(), (ROOT / 'tts/yuki-codex-stream.py').read_bytes())
+        self.assertEqual((lib / 'tts/assets/yuki_super-clean.wav').read_bytes(), (ROOT / 'tts/assets/yuki_super-clean.wav').read_bytes())
         (lib / '.installed-by-codex-enikk').write_text('unmanaged')
         result = subprocess.run(['bash', str(ROOT / 'update.sh')], env=env, capture_output=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(len(list(lib.glob('previous-*'))), 1)
+
+    def test_stream_dependency_is_pinned_in_existing_venv(self):
+        setup = (ROOT / 'tts/setup-tts.sh').read_text()
+        self.assertIn('m.version("websocket-client") == "1.9.0"', setup)
+        self.assertIn('pip install \'websocket-client==1.9.0\'', setup)
+        self.assertIn('elif [[ ! -f "$reference" ]]', setup)
+        self.assertNotIn('rm -rf', setup)
 
     def test_install_collision_preserves_existing(self):
         prefix = self.base / 'prefix'
