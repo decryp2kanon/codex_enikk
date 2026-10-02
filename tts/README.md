@@ -10,7 +10,8 @@ The external runtime defaults to `~/Apps/chatterbox-yuki` and requires:
 - ALSA `aplay`
 
 The fixed voice is SUPER-CLEAN C2: Korean, exaggeration `0.50`, and CFG weight `0.70`.
-Failures reset conditioning and retry once; a second failure skips only that chunk.
+Failures reset conditioning and retry once. After two failed generation attempts, the chunk
+is recorded as FAILED_EXPLICITLY with its text and reason; other chunks continue.
 `setup-tts.sh` creates the venv and installs dependencies. CUDA is selected when available;
 otherwise the worker uses CPU. Model files are downloaded by Chatterbox on first use and kept
 in its normal user cache.
@@ -26,3 +27,11 @@ The installer validates the WAV with `torchaudio`. Updates preserve the existing
 cache, and reference unless the override is explicitly supplied.
 Set `CODEX_ENIKK_TTS=0` to disable TTS or `CODEX_ENIKK_CHATTERBOX_HOME` to select another
 external Chatterbox directory. TTS failure never prevents the Codex wrapper from running.
+
+Playback acknowledgements are saved atomically per chunk. Jobs are removed only after all
+chunks are PLAYED. Playback errors are isolated to the item and do not stop the consumer.
+Jobs containing explicit failures are retained as `.failed-*` files in the TTS state `jobs/`
+directory, including the original message, chunk text, and failure reasons. They are parked
+for explicit recovery, not automatically retried forever. On restart, interrupted ordinary
+jobs resume chunks without saved terminal acknowledgements. A crash after audible playback
+but before its acknowledgement can replay that chunk; acknowledged chunks are not replayed.

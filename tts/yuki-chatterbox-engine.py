@@ -241,10 +241,74 @@ def suspicious_audio(wav, sample_rate, text):
     return False, "", duration
 
 
+class DeliveryJob:
+    """Persist chunk acknowledgements; a queued WAV is not delivered yet."""
+    def __init__(self, path, item, parts):
+        self.path = path
+        self.item = item
+        self.lock = threading.Lock()
+        delivery = item.setdefault("delivery", {"parts": parts, "terminal": {}})
+        self.parts = delivery["parts"]
+        self.terminal = delivery["terminal"]
+        self.complete = False
+        self._save()
+        self._cleanup_if_complete()
+
+    def _save(self):
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                             dir=self.path.parent, prefix=".delivery-",
+                                             delete=False) as stream:
+                temporary = Path(stream.name)
+                json.dump(self.item, stream, ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.path)
+            self._sync_directory()
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+
+    def _sync_directory(self):
+        fd = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+    def _cleanup_if_complete(self):
+        if all(str(i) in self.terminal for i in range(len(self.parts))):
+            if any(status != "PLAYED" for status in self.terminal.values()):
+                failed_path = self.path.with_name(".failed-" + self.path.name)
+                os.replace(self.path, failed_path)
+                log(f"Chatterbox job_failed job={self.item['id']} recoverable={failed_path}")
+            else:
+                self.path.unlink(missing_ok=True)
+                log(f"Chatterbox job_cleanup job={self.item['id']} final=PLAYED")
+            self._sync_directory()
+            self.complete = True
+
+    def finish(self, number, status, reason=None):
+        with self.lock:
+            self.terminal[str(number)] = "PLAYED" if status == "played" else "FAILED_EXPLICITLY"
+            if status != "played":
+                self.item["delivery"].setdefault("failures", {})[str(number)] = reason or status
+            self._save()
+            self._cleanup_if_complete()
+
+
 def playback(ready):
     previous_end = None
     while True:
-        job_id, number, path, queued_ns, generated, audio_duration = ready.get()
+        entry = ready.get()
+        if entry is None:  # Graceful sentinel, also used by CPU-only tests.
+            ready.task_done()
+            return
+        job, number, path, queued_ns, generated, audio_duration = entry
+        job_id = job.item["id"]
+        status = "playback_failed"
+        failure_reason = None
         try:
             started = time.monotonic()
             gap = 0.0 if previous_end is None else max(0.0, started - previous_end)
@@ -253,10 +317,29 @@ def playback(ready):
                 log(f"Chatterbox first audio latency {(time.monotonic_ns()-queued_ns)/1e9:.3f}s job={job_id}")
             subprocess.run(["/usr/bin/aplay", "-q", path], check=True,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            previous_end = time.monotonic()
-            log(f"Chatterbox playback done job={job_id} part={number} final=played")
+            status = "played"
+        except Exception as exc:
+            failure_reason = f"{type(exc).__name__}: {exc}"
+            # An item failure must not terminate the queue consumer.
+            try:
+                log(f"Chatterbox playback_failed job={job_id} part={number} error={type(exc).__name__} returncode={getattr(exc, 'returncode', None)}")
+            except Exception:
+                pass
         finally:
-            Path(path).unlink(missing_ok=True)
+            previous_end = time.monotonic()
+            try:
+                job.finish(number, status, failure_reason)
+                log(f"Chatterbox playback done job={job_id} part={number} final={status}")
+            except Exception as exc:
+                # Keep the source job for restart recovery if acknowledgement fails.
+                try:
+                    log(f"Chatterbox acknowledgement_failed job={job_id} part={number} error={type(exc).__name__}")
+                except Exception:
+                    pass
+            try:
+                Path(path).unlink(missing_ok=True)
+            except OSError:
+                pass
             ready.task_done()
 
 
@@ -276,27 +359,36 @@ def run():
         log(f"Chatterbox C2 ready load_time={time.monotonic()-started:.3f}s reference={REFERENCE} state={canonical_state}")
         ready = queue.Queue()
         threading.Thread(target=playback, args=(ready,), daemon=True).start()
+        in_flight = {}
         while True:
+            in_flight = {path: job for path, job in in_flight.items() if not job.complete}
             for path in sorted(JOBS.iterdir()):
-                if not path.is_file() or path.name.startswith("."):
+                if path in in_flight or not path.is_file() or path.name.startswith("."):
                     continue
                 item = json.loads(path.read_text(encoding="utf-8"))
                 preprocessing = time.monotonic()
-                candidates = [korean_pronunciation(part) for part in speech_chunks(item["text"])]
+                originals = speech_chunks(item["text"])
+                candidates = [korean_pronunciation(part) for part in originals]
                 parts = []
-                for candidate in candidates:
+                for index, candidate in enumerate(candidates):
                     reason = segment_drop_reason(candidate)
-                    log(f"Chatterbox segment job={item['id']} repr={candidate!r} dropped={bool(reason)} reason={reason or '-'}")
+                    log(f"Chatterbox segment job={item['id']} part={len(parts) if not reason else 'none'} source_part={index} original={originals[index]!r} repr={candidate!r} dropped={bool(reason)} reason={reason or '-'}")
                     if not reason:
                         parts.append(candidate.strip())
                 log(f"Chatterbox accepted job={item['id']} normalized={item['text']!r} segments={len(parts)} preprocessing={time.monotonic()-preprocessing:.6f}s")
-                for number, sentence in enumerate(parts):
+                job = DeliveryJob(path, item, parts)
+                in_flight[path] = job
+                for number, sentence in enumerate(job.parts):
+                    if str(number) in job.terminal:
+                        continue
                     # Final defense at the synthesis boundary, independent of the splitter.
                     reason = segment_drop_reason(sentence)
                     if reason:
                         log(f"Chatterbox pre-generate drop job={item['id']} part={number} repr={sentence!r} reason={reason}")
+                        job.finish(number, "formatting_skipped")
                         continue
                     accepted = None
+                    last_failure = None
                     for attempt in range(2):
                         began = time.monotonic()
                         log(f"Chatterbox generate start job={item['id']} part={number} attempt={attempt + 1} text_len={len(sentence)} text={sentence!r}")
@@ -310,6 +402,7 @@ def run():
                             finally:
                                 anomaly_logger.removeHandler(warnings)
                         except Exception as exc:
+                            last_failure = f"generate: {type(exc).__name__}: {exc}"
                             log(f"Chatterbox generate error job={item['id']} part={number} attempt={attempt + 1} error={type(exc).__name__}")
                             torch.cuda.empty_cache()
                             model.prepare_conditionals(str(REFERENCE), exaggeration=0.50)
@@ -317,6 +410,7 @@ def run():
                             log(f"Chatterbox conditioning reset job={item['id']} part={number} state={canonical_state}")
                             continue
                         if warnings.reason:
+                            last_failure = warnings.reason
                             log(f"Chatterbox generation anomaly job={item['id']} part={number} attempt={attempt + 1} reason={warnings.reason}")
                             del wav
                             torch.cuda.empty_cache()
@@ -327,6 +421,7 @@ def run():
                         wav, leading_silence, trailing_silence = trim_edge_silence(wav, model.sr)
                         rejected, reason, duration = suspicious_audio(wav, model.sr, sentence)
                         if rejected:
+                            last_failure = reason
                             log(f"Chatterbox artifact rejected job={item['id']} part={number} attempt={attempt + 1} duration={duration:.2f}s reason={reason}")
                             del wav
                             torch.cuda.empty_cache()
@@ -339,7 +434,8 @@ def run():
                     if accepted is None:
                         model.prepare_conditionals(str(REFERENCE), exaggeration=0.50)
                         canonical_state = conditioning_state(model)
-                        log(f"Chatterbox chunk skipped job={item['id']} part={number} engine=chatterbox retries=2 skip=true state={canonical_state}")
+                        log(f"Chatterbox chunk_failed job={item['id']} part={number} engine=chatterbox attempts=2 final=FAILED_EXPLICITLY reason={last_failure!r} state={canonical_state}")
+                        job.finish(number, "generation_failed", last_failure)
                         continue
                     wav, began, duration = accepted
                     state_after = conditioning_state(model)
@@ -349,9 +445,8 @@ def run():
                     torchaudio.save(output.name, wav, model.sr)
                     generated = time.monotonic()
                     log(f"Chatterbox generate done job={item['id']} part={number} generation={generated-began:.3f}s audio={duration:.2f}s trimmed_leading={leading_silence:.3f}s trimmed_trailing={trailing_silence:.3f}s")
-                    ready.put((item["id"], number, output.name, item["queued_ns"], generated, duration))
+                    ready.put((job, number, output.name, item["queued_ns"], generated, duration))
                     log(f"Chatterbox playback queued job={item['id']} part={number} final=queued")
-                path.unlink(missing_ok=True)
             time.sleep(0.05)
 
 
