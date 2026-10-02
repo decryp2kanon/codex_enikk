@@ -52,9 +52,14 @@ def ensure_engine():
         except BlockingIOError:
             return  # The resident model is already running.
         fcntl.flock(lock, fcntl.LOCK_UN)
-    # The engine takes the same lock before loading the model.
+    chatterbox_root = Path(os.environ.get("CODEX_ENIKK_CHATTERBOX_HOME", Path.home() / "Apps/chatterbox-yuki"))
+    chatterbox_python = chatterbox_root / ".venv/bin/python"
+    use_chatterbox = (ROOT / "yuki-chatterbox-engine.py").is_file() and chatterbox_python.is_file()
+    engine = ROOT / ("yuki-chatterbox-engine.py" if use_chatterbox else "yuki-tts-engine.py")
+    python = chatterbox_python if use_chatterbox else Path(sys.executable)
+    # The selected engine takes the same lock before loading its persistent model.
     with LOG.open("a", encoding="utf-8") as output:
-        subprocess.Popen([sys.executable, str(ROOT / "yuki-tts-engine.py")],
+        subprocess.Popen([str(python), str(engine)],
                          stdin=subprocess.DEVNULL, stdout=output, stderr=output,
                          start_new_session=True, close_fds=True)
 
@@ -90,7 +95,7 @@ def handle_notification(payload):
             json.dump({"id": event_id[:12], "text": text, "queued_ns": time.monotonic_ns()}, stream)
         os.replace(temporary, job)
         ensure_engine()
-        log_status("queued completed turn")
+        log_status(f"queued completed turn job={event_id[:12]} original_len={len(answer)} cleaned_len={len(text)}")
     except Exception:
         job.unlink(missing_ok=True)
         temporary.unlink(missing_ok=True)

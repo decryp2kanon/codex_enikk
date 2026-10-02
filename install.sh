@@ -38,7 +38,7 @@ trap cleanup EXIT
 for file in enikk.py restore.py README.md LICENSE VERSION uninstall.sh "${commands[@]}"; do
     install -m 644 -- "$source_dir/$file" "$lib/$file"
 done
-for file in README.md setup-tts.sh yuki-codex-notify.py yuki-codex-rollout-watch.py yuki-tts-engine.py yuki-f5ttl-f4dp.json; do
+for file in README.md setup-tts.sh yuki-chatterbox-engine.py yuki-codex-notify.py yuki-codex-rollout-watch.py yuki-tts-engine.py yuki-f5ttl-f4dp.json; do
     install -m 644 -- "$source_dir/tts/$file" "$lib/tts/$file"
 done
 chmod 755 "$lib/tts/setup-tts.sh"
