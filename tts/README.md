@@ -12,8 +12,9 @@ Runtime requirements:
 
 `install.sh` creates the private runtime at `lib/codex_enikk/tts-venv` and installs
 `supertonic==1.3.1` there. On an Ubuntu root installation it also installs `python3-venv`,
-`ffmpeg`, `alsa-utils`, `librubberband2`, and `libsndfile1` through APT. A user-prefix installation expects those OS packages to
-already exist. Set `CODEX_ENIKK_INSTALL_TTS=0` while installing or updating to skip provisioning.
+`ffmpeg`, `alsa-utils`, `librubberband2`, and `libsndfile1` through APT. A user-prefix installation
+expects those OS packages to already exist. Set `CODEX_ENIKK_INSTALL_TTS=0` while installing or
+updating to skip provisioning.
 
 The voice settings are fixed at Korean, Supertonic speed `1.0`, Rubber Band tempo `1.3`, and pitch
 `1.12246`. Model files are downloaded and cached by Supertonic and are never stored in this

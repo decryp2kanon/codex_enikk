@@ -176,6 +176,71 @@ TTS 의존성이 없거나 TTS가 실패해도 Codex TUI, 세션 연속성, 백�
 `CODEX_ENIKK_INSTALL_TTS=0`은 설치·업데이트 중 선택 구성 준비를 건너뜁니다. 제거 시
 프로그램의 venv와 스타일은 제거하지만 사용자 모델 캐시는 보존합니다.
 
+### TTS 사용법
+
+Ubuntu 22.04 이상에서 일반적인 전역 설치는 다음과 같습니다. 설치 프로그램이 필요한
+Ubuntu 패키지와 전용 Python 환경을 준비합니다.
+
+```bash
+git clone https://github.com/decryp2kanon/codex_enikk.git
+cd codex_enikk
+sudo ./install.sh
+cd /path/to/existing-project
+codex_enikk
+```
+
+별도 TTS 명령을 실행할 필요는 없습니다. `codex_enikk`를 실행하면 TTS worker가 함께
+시작되고, 화면에 완성되어 표시된 CODEX 진행 메시지와 최종 답변을 순서대로 읽습니다.
+첫 음성에서는 Supertonic 3 모델을 사용자 캐시에 받으므로 네트워크 상태에 따라 시간이
+걸릴 수 있습니다. 이후 실행에서는 같은 캐시를 재사용합니다.
+
+관리자 권한 없이 사용자 경로에 설치하려면 OS 패키지만 먼저 준비합니다.
+
+```bash
+sudo apt-get update
+sudo apt-get install python3-venv ffmpeg alsa-utils librubberband2 libsndfile1
+PREFIX="$HOME/.local" ./install.sh
+export PATH="$HOME/.local/bin:$PATH"
+codex_enikk
+```
+
+한 번만 음성을 끄거나, TTS 구성 없이 설치·업데이트하려면 다음 환경변수를 사용합니다.
+
+```bash
+CODEX_ENIKK_TTS=0 codex_enikk
+sudo env CODEX_ENIKK_INSTALL_TTS=0 ./install.sh
+sudo env CODEX_ENIKK_INSTALL_TTS=0 bash ./update.sh
+```
+
+설치 후 TTS 구성만 다시 준비하려면 설치 경로의 setup script를 실행합니다.
+
+```bash
+# 기본 전역 설치
+sudo /usr/local/lib/codex_enikk/tts/setup-tts.sh
+
+# 사용자 PREFIX 설치
+"$HOME/.local/lib/codex_enikk/tts/setup-tts.sh"
+```
+
+업데이트는 새로 받은 source 폴더에서 실행하고, 실행 중인 `codex_enikk`를 종료한 뒤 다시
+시작합니다.
+
+```bash
+git pull --ff-only
+sudo bash ./update.sh
+codex_enikk
+```
+
+문제가 있으면 다음 항목으로 설치 상태를 확인할 수 있습니다. TTS가 실패해도 Codex의
+세션 연속성, 백업, transcript와 TUI는 계속 동작합니다.
+
+```bash
+/usr/local/lib/codex_enikk/tts-venv/bin/python -c 'import supertonic; print(supertonic.__version__)'
+ffmpeg -hide_banner -filters 2>/dev/null | grep rubberband
+command -v aplay
+tail -n 50 "$HOME/.local/state/codex_enikk/tts/notify.log"
+```
+
 ## 제거 및 테스트
 
 ```bash
