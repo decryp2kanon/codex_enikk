@@ -149,7 +149,13 @@ def speech_chunks(text, minimum=20, target=28, maximum=55):
             chunks.append(current)
             current = ""
     if current:
-        chunks.append(current)
+        # Do not leave a short sentence tail (for example, "해.") as its own
+        # generation. Chatterbox frequently reports long_tail for these tiny
+        # fragments. Preserve the text by joining it to the preceding chunk.
+        if chunks and len(current) < minimum and len(chunks[-1]) + 1 + len(current) <= maximum:
+            chunks[-1] = f"{chunks[-1]} {current}"
+        else:
+            chunks.append(current)
     return chunks
 
 
@@ -248,6 +254,7 @@ def playback(ready):
             subprocess.run(["/usr/bin/aplay", "-q", path], check=True,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             previous_end = time.monotonic()
+            log(f"Chatterbox playback done job={job_id} part={number} final=played")
         finally:
             Path(path).unlink(missing_ok=True)
             ready.task_done()
@@ -344,6 +351,7 @@ def run():
                     generated = time.monotonic()
                     log(f"Chatterbox generate done job={item['id']} part={number} generation={generated-began:.3f}s audio={duration:.2f}s trimmed_leading={leading_silence:.3f}s trimmed_trailing={trailing_silence:.3f}s")
                     ready.put((item["id"], number, output.name, item["queued_ns"], generated, duration))
+                    log(f"Chatterbox playback queued job={item['id']} part={number} final=queued")
                 path.unlink(missing_ok=True)
             time.sleep(0.05)
 
