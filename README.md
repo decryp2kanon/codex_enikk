@@ -169,6 +169,13 @@ TTS 의존성이 없거나 TTS가 실패해도 Codex TUI, 세션 연속성, 백�
 동작합니다. Supertonic 모델 캐시, WAV, 세션 파일과 인증 정보는 저장소나 관리 설치에
 포함하지 않습니다.
 
+신규 Ubuntu root 설치는 `python3-venv`, `ffmpeg`, `alsa-utils`, `librubberband2`,
+`libsndfile1`을 준비하고 전용
+`tts-venv`에 `supertonic==1.3.1`을 설치합니다. 모델은 첫 음성 생성 때 사용자 캐시
+`~/.cache/supertonic3`에 받아 재사용합니다. `CODEX_ENIKK_TTS=0`은 실행 시 TTS를 끄고,
+`CODEX_ENIKK_INSTALL_TTS=0`은 설치·업데이트 중 선택 구성 준비를 건너뜁니다. 제거 시
+프로그램의 venv와 스타일은 제거하지만 사용자 모델 캐시는 보존합니다.
+
 ## 제거 및 테스트
 
 ```bash

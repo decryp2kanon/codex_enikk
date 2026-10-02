@@ -43,6 +43,7 @@ class EnikkTests(unittest.TestCase):
         self.sessions = self.data / 'sessions'
         self.sessions.mkdir(parents=True)
         self.env = os.environ.copy()
+        self.env['CODEX_ENIKK_INSTALL_TTS'] = '0'
         self.env.update(HOME=str(self.home), CODEX_HOME=str(self.data),
                         CODEX_ENIKK_DATA_DIR=str(self.enikk_data))
         self.env.pop('CODEX_THREAD_ID', None)

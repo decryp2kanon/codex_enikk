@@ -40,11 +40,17 @@ for file in README.md VERSION enikk.py; do
     temporary=""
 done
 tts_temporary="$(mktemp -d "$lib/.tts.XXXXXXXX")"
-for file in README.md yuki-codex-notify.py yuki-codex-rollout-watch.py yuki-tts-engine.py yuki-f5ttl-f4dp.json; do
+for file in README.md setup-tts.sh yuki-codex-notify.py yuki-codex-rollout-watch.py yuki-tts-engine.py yuki-f5ttl-f4dp.json; do
     install -m 644 -- "$source_dir/tts/$file" "$tts_temporary/$file"
 done
+chmod 755 "$tts_temporary/setup-tts.sh"
 rm -rf -- "$lib/tts"
 mv -- "$tts_temporary" "$lib/tts"
+if [[ -z "$stage" && "${CODEX_ENIKK_INSTALL_TTS:-1}" != 0 ]]; then
+    if ! "$lib/tts/setup-tts.sh"; then
+        printf '%s\n' '경고: 선택적 TTS 업데이트에 실패했습니다. Codex 기본 기능은 정상적으로 사용할 수 있습니다.' >&2
+    fi
+fi
 printf '이전 버전 보존: %s\n' "$previous"
 "${stage}${prefix}/bin/codex_enikk" --version
 printf '%s\n' '업데이트 완료. 기존 앱을 종료한 뒤 codex_enikk를 다시 실행하세요.'

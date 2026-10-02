@@ -38,9 +38,10 @@ trap cleanup EXIT
 for file in enikk.py restore.py README.md LICENSE VERSION uninstall.sh "${commands[@]}"; do
     install -m 644 -- "$source_dir/$file" "$lib/$file"
 done
-for file in README.md yuki-codex-notify.py yuki-codex-rollout-watch.py yuki-tts-engine.py yuki-f5ttl-f4dp.json; do
+for file in README.md setup-tts.sh yuki-codex-notify.py yuki-codex-rollout-watch.py yuki-tts-engine.py yuki-f5ttl-f4dp.json; do
     install -m 644 -- "$source_dir/tts/$file" "$lib/tts/$file"
 done
+chmod 755 "$lib/tts/setup-tts.sh"
 chmod 755 "$lib/uninstall.sh"
 for name in "${commands[@]}"; do
     chmod 755 "$lib/$name"
@@ -48,4 +49,9 @@ for name in "${commands[@]}"; do
 done
 printf '%s\n' 'codex_enikk-managed-install-v1' > "$lib/.installed-by-codex-enikk"
 complete=1
+if [[ -z "$stage" && "${CODEX_ENIKK_INSTALL_TTS:-1}" != 0 ]]; then
+    if ! "$lib/tts/setup-tts.sh"; then
+        printf '%s\n' '경고: 선택적 TTS 설치에 실패했습니다. Codex 기본 기능은 정상적으로 사용할 수 있습니다.' >&2
+    fi
+fi
 printf '설치 완료: %s/bin/codex_enikk\n' "$base"

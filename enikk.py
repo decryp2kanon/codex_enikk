@@ -549,13 +549,17 @@ def conversation(session_id, instance_fd, args=()):
     # Inherit stdin/stdout/stderr and the foreground terminal. Do not pipe or
     # parse TUI output: doing so breaks image paste, raw input and rendering.
     with owned_processes():
-        tts_script = Path(__file__).resolve().parent / 'tts' / 'yuki-codex-rollout-watch.py'
-        tts_ready = (tts_script.is_file() and importlib.util.find_spec('supertonic') is not None
-                     and shutil.which('ffmpeg') and shutil.which('aplay'))
+        install_root = Path(__file__).resolve().parent
+        tts_script = install_root / 'tts' / 'yuki-codex-rollout-watch.py'
+        venv_python = install_root / 'tts-venv' / 'bin' / 'python'
+        tts_python = str(venv_python) if venv_python.is_file() else sys.executable
+        tts_module = venv_python.is_file() or importlib.util.find_spec('supertonic') is not None
+        tts_ready = (os.environ.get('CODEX_ENIKK_TTS', '1') != '0' and tts_script.is_file()
+                     and tts_module and shutil.which('ffmpeg') and shutil.which('aplay'))
         if tts_ready:
             # TTS is optional: it follows completed user-facing Codex messages,
             # while failures stay isolated from the native TUI.
-            subprocess.Popen([sys.executable, str(tts_script)], stdin=subprocess.DEVNULL,
+            subprocess.Popen([tts_python, str(tts_script)], stdin=subprocess.DEVNULL,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              close_fds=True)
         # Never let descendants keep the wrapper's single-instance socket alive.
