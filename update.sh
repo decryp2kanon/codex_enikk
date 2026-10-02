@@ -43,6 +43,8 @@ tts_temporary="$(mktemp -d "$lib/.tts.XXXXXXXX")"
 for file in README.md setup-tts.sh yuki-chatterbox-engine.py yuki-codex-notify.py yuki-codex-rollout-watch.py; do
     install -m 644 -- "$source_dir/tts/$file" "$tts_temporary/$file"
 done
+mkdir -- "$tts_temporary/assets"
+install -m 644 -- "$source_dir/tts/assets/yuki_super-clean.wav" "$tts_temporary/assets/yuki_super-clean.wav"
 chmod 755 "$tts_temporary/setup-tts.sh"
 rm -rf -- "$lib/tts"
 mv -- "$tts_temporary" "$lib/tts"

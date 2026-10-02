@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Persistent CUDA Chatterbox C2 worker."""
+"""Persistent Chatterbox C2 worker using CUDA when available."""
 
 import fcntl
 import json
@@ -263,15 +263,14 @@ def playback(ready):
 def run():
     STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
     JOBS.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if not torch.cuda.is_available():
-        raise RuntimeError("CUDA is unavailable")
     if not REFERENCE.is_file():
         raise FileNotFoundError(REFERENCE)
     with (STATE / "engine.lock").open("a+b") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         started = time.monotonic()
-        log("loading Chatterbox multilingual model on CUDA")
-        model = ChatterboxMultilingualTTS.from_pretrained(device="cuda")
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        log(f"loading Chatterbox multilingual model on {device}; first run may download model files")
+        model = ChatterboxMultilingualTTS.from_pretrained(device=device)
         model.prepare_conditionals(str(REFERENCE), exaggeration=0.50)
         canonical_state = conditioning_state(model)
         log(f"Chatterbox C2 ready load_time={time.monotonic()-started:.3f}s reference={REFERENCE} state={canonical_state}")
@@ -363,4 +362,4 @@ if __name__ == "__main__":
         pass
     except Exception as exc:
         STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
-        log(f"Chatterbox failed: {type(exc).__name__}; alternate TTS disabled")
+        log(f"Chatterbox failed: {type(exc).__name__}: {exc}; alternate TTS disabled")

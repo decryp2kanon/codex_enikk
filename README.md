@@ -168,10 +168,11 @@ Chatterbox 모델과 SUPER-CLEAN C2 conditioning은 worker 시작 시 한 번 �
 TTS 의존성이 없거나 TTS가 실패해도 Codex TUI, 세션 연속성, 백업과 transcript는 계속
 동작합니다. Chatterbox 모델, WAV, 세션 파일과 인증 정보는 저장소나 관리 설치에 포함하지 않습니다.
 
-신규 Ubuntu root 설치는 `alsa-utils`를 준비하고 외부 `~/Apps/chatterbox-yuki` 환경을 확인합니다.
+신규 Ubuntu 설치는 `python3-venv`, `alsa-utils`, `libsndfile1`과 전용 venv를 준비하고
+`chatterbox-tts==0.1.7`을 설치합니다. CUDA가 있으면 GPU를, 없으면 CPU를 사용합니다.
 `CODEX_ENIKK_TTS=0`은 실행 시 TTS를 끄고,
 `CODEX_ENIKK_INSTALL_TTS=0`은 설치·업데이트 중 선택 구성 준비를 건너뜁니다. 제거 시
-프로그램의 venv와 스타일은 제거하지만 사용자 모델 캐시는 보존합니다.
+관리 설치 파일만 제거하며 사용자 venv, reference와 모델 cache는 보존합니다.
 
 ### TTS 사용법
 
@@ -188,12 +189,15 @@ codex_enikk
 
 별도 TTS 명령을 실행할 필요는 없습니다. `codex_enikk`를 실행하면 TTS worker가 함께
 시작되고, 화면에 완성되어 표시된 CODEX 진행 메시지와 최종 답변을 순서대로 읽습니다.
-Chatterbox CUDA 모델은 persistent worker가 한 번 로드한 뒤 재사용합니다.
+Chatterbox 모델은 최초 실행 때 정상 사용자 cache로 자동 다운로드되고 persistent worker가
+한 번 로드한 뒤 재사용합니다. bundled `yuki_super-clean.wav`도 자동 설치되고 실제로 열어
+검증합니다. 기존 reference와 venv는 업데이트 때 덮어쓰거나 삭제하지 않습니다.
+다른 승인된 reference를 명시적으로 설치하려면
+`CODEX_ENIKK_CHATTERBOX_REFERENCE_SOURCE=/path/reference.wav`를 설치 명령에 지정합니다.
 
-한국어 문장 안의 연속된 영문 기술어는 동일한 유키짱 음색을 유지하면서 영어 발음으로
-합성합니다. 예를 들어 `CPU usage`, `GitHub branch`, `TTS latency` 같은 구간만 영어로
-routing하고 주변 한국어는 계속 한국어로 읽습니다. 각 언어 segment는 완성되는 즉시
-재생 queue에 들어가므로 뒤쪽 혼합 문장 전체의 합성을 기다리며 침묵하지 않습니다.
+한국어 문장 안의 주요 영문 기술어는 TTS 내부에서 한국식 발음으로 바꾸고 계속 한국어로
+합성합니다. 화면에 표시되는 원문은 변경하지 않습니다. 각 chunk는 완성되는 즉시 재생
+queue에 들어가므로 뒤쪽 문장 전체의 합성을 기다리지 않습니다.
 
 단일 줄바꿈은 같은 대화 흐름으로 이어 읽고, 빈 줄은 짧은 문단 호흡으로 처리합니다.
 모델이 만든 앞뒤 silence도 정리하여 chunk 경계에서 긴 공백이 누적되지 않게 합니다.

@@ -23,6 +23,7 @@ done
 mkdir -p -- "$base/lib" "$base/bin"
 mkdir -- "$lib"
 mkdir -- "$lib/tts"
+mkdir -- "$lib/tts/assets"
 complete=0
 cleanup() {
     if [[ "$complete" == 0 ]]; then
@@ -41,6 +42,7 @@ done
 for file in README.md setup-tts.sh yuki-chatterbox-engine.py yuki-codex-notify.py yuki-codex-rollout-watch.py; do
     install -m 644 -- "$source_dir/tts/$file" "$lib/tts/$file"
 done
+install -m 644 -- "$source_dir/tts/assets/yuki_super-clean.wav" "$lib/tts/assets/yuki_super-clean.wav"
 chmod 755 "$lib/tts/setup-tts.sh"
 chmod 755 "$lib/uninstall.sh"
 for name in "${commands[@]}"; do
