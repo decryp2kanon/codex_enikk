@@ -55,8 +55,11 @@ def ensure_engine():
     chatterbox_root = Path(os.environ.get("CODEX_ENIKK_CHATTERBOX_HOME", Path.home() / "Apps/chatterbox-yuki"))
     chatterbox_python = chatterbox_root / ".venv/bin/python"
     use_chatterbox = (ROOT / "yuki-chatterbox-engine.py").is_file() and chatterbox_python.is_file()
-    engine = ROOT / ("yuki-chatterbox-engine.py" if use_chatterbox else "yuki-tts-engine.py")
-    python = chatterbox_python if use_chatterbox else Path(sys.executable)
+    if not use_chatterbox:
+        log_status("Chatterbox unavailable; TTS skipped (Supertonic runtime disabled)")
+        return
+    engine = ROOT / "yuki-chatterbox-engine.py"
+    python = chatterbox_python
     # The selected engine takes the same lock before loading its persistent model.
     with LOG.open("a", encoding="utf-8") as output:
         subprocess.Popen([str(python), str(engine)],

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Persistent CUDA Chatterbox C2 worker with Supertonic fallback."""
+"""Persistent CUDA Chatterbox C2 worker."""
 
 import fcntl
 import json
@@ -9,7 +9,6 @@ from pathlib import Path
 import queue
 import re
 import subprocess
-import sys
 import tempfile
 import threading
 import time
@@ -95,6 +94,12 @@ def normalize_numbers(text):
 def log(message):
     with (STATE / "notify.log").open("a", encoding="utf-8") as out:
         out.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {message}\n")
+
+
+def conditioning_state(model):
+    conds = model.conds
+    speaker = conds.t3.speaker_emb
+    return f"conds={id(conds)} speaker={id(speaker)} shape={tuple(speaker.shape)} mean={speaker.float().mean().item():.6f}"
 
 
 def sentences(text):
@@ -260,7 +265,9 @@ def run():
         started = time.monotonic()
         log("loading Chatterbox multilingual model on CUDA")
         model = ChatterboxMultilingualTTS.from_pretrained(device="cuda")
-        log(f"Chatterbox C2 ready load_time={time.monotonic()-started:.3f}s")
+        model.prepare_conditionals(str(REFERENCE), exaggeration=0.50)
+        canonical_state = conditioning_state(model)
+        log(f"Chatterbox C2 ready load_time={time.monotonic()-started:.3f}s reference={REFERENCE} state={canonical_state}")
         ready = queue.Queue()
         threading.Thread(target=playback, args=(ready,), daemon=True).start()
         while True:
@@ -292,18 +299,24 @@ def run():
                             anomaly_logger = logging.getLogger("chatterbox.models.t3.inference.alignment_stream_analyzer")
                             anomaly_logger.addHandler(warnings)
                             try:
-                                wav = model.generate(sentence, language_id="ko", audio_prompt_path=str(REFERENCE),
-                                                     exaggeration=0.50, cfg_weight=0.70).cpu()
+                                wav = model.generate(sentence, language_id="ko", exaggeration=0.50,
+                                                     cfg_weight=0.70).cpu()
                             finally:
                                 anomaly_logger.removeHandler(warnings)
                         except Exception as exc:
                             log(f"Chatterbox generate error job={item['id']} part={number} attempt={attempt + 1} error={type(exc).__name__}")
                             torch.cuda.empty_cache()
+                            model.prepare_conditionals(str(REFERENCE), exaggeration=0.50)
+                            canonical_state = conditioning_state(model)
+                            log(f"Chatterbox conditioning reset job={item['id']} part={number} state={canonical_state}")
                             continue
                         if warnings.reason:
                             log(f"Chatterbox generation anomaly job={item['id']} part={number} attempt={attempt + 1} reason={warnings.reason}")
                             del wav
                             torch.cuda.empty_cache()
+                            model.prepare_conditionals(str(REFERENCE), exaggeration=0.50)
+                            canonical_state = conditioning_state(model)
+                            log(f"Chatterbox conditioning reset job={item['id']} part={number} state={canonical_state}")
                             continue
                         wav, leading_silence, trailing_silence = trim_edge_silence(wav, model.sr)
                         rejected, reason, duration = suspicious_audio(wav, model.sr, sentence)
@@ -311,17 +324,20 @@ def run():
                             log(f"Chatterbox artifact rejected job={item['id']} part={number} attempt={attempt + 1} duration={duration:.2f}s reason={reason}")
                             del wav
                             torch.cuda.empty_cache()
+                            model.prepare_conditionals(str(REFERENCE), exaggeration=0.50)
+                            canonical_state = conditioning_state(model)
+                            log(f"Chatterbox conditioning reset job={item['id']} part={number} state={canonical_state}")
                             continue
                         accepted = (wav, began, duration)
                         break
                     if accepted is None:
-                        # Preserve only the unheard remainder for the fallback engine.
-                        item["text"] = " ".join(parts[number:])
-                        temporary = path.with_name(f".{path.name}.fallback")
-                        temporary.write_text(json.dumps(item), encoding="utf-8")
-                        os.replace(temporary, path)
-                        raise RuntimeError("Chatterbox generation rejected twice")
+                        model.prepare_conditionals(str(REFERENCE), exaggeration=0.50)
+                        canonical_state = conditioning_state(model)
+                        log(f"Chatterbox chunk skipped job={item['id']} part={number} engine=chatterbox retries=2 skip=true supertonic_called=false state={canonical_state}")
+                        continue
                     wav, began, duration = accepted
+                    state_after = conditioning_state(model)
+                    log(f"Chatterbox state job={item['id']} part={number} engine=chatterbox retry={attempt} reference={REFERENCE} before={canonical_state} after={state_after}")
                     output = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
                     output.close()
                     torchaudio.save(output.name, wav, model.sr)
@@ -332,16 +348,6 @@ def run():
             time.sleep(0.05)
 
 
-def fallback():
-    candidates = [ROOT.parent / "tts-venv/bin/python", Path("/usr/bin/python3")]
-    python = next((path for path in candidates if path.is_file()), None)
-    if python and (ROOT / "yuki-tts-engine.py").is_file():
-        log("starting preserved Supertonic fallback")
-        subprocess.Popen([str(python), str(ROOT / "yuki-tts-engine.py")], stdin=subprocess.DEVNULL,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True, close_fds=True)
-
-
 if __name__ == "__main__":
     try:
         run()
@@ -349,5 +355,4 @@ if __name__ == "__main__":
         pass
     except Exception as exc:
         STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
-        log(f"Chatterbox failed: {type(exc).__name__}; falling back")
-        fallback()
+        log(f"Chatterbox failed: {type(exc).__name__}; Supertonic disabled")
