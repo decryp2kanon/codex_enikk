@@ -22,6 +22,7 @@ for name in "${commands[@]}"; do
 done
 mkdir -p -- "$base/lib" "$base/bin"
 mkdir -- "$lib"
+mkdir -- "$lib/tts"
 complete=0
 cleanup() {
     if [[ "$complete" == 0 ]]; then
@@ -36,6 +37,9 @@ cleanup() {
 trap cleanup EXIT
 for file in enikk.py restore.py README.md LICENSE VERSION uninstall.sh "${commands[@]}"; do
     install -m 644 -- "$source_dir/$file" "$lib/$file"
+done
+for file in README.md yuki-codex-notify.py yuki-codex-rollout-watch.py yuki-tts-engine.py yuki-f5ttl-f4dp.json; do
+    install -m 644 -- "$source_dir/tts/$file" "$lib/tts/$file"
 done
 chmod 755 "$lib/uninstall.sh"
 for name in "${commands[@]}"; do

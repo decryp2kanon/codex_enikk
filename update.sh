@@ -20,10 +20,14 @@ python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); compile(p.read_text
 for file in enikk.py VERSION README.md; do
     [[ -f "$source_dir/$file" && -f "$lib/$file" && ! -L "$lib/$file" ]] || exit 1
 done
+[[ -d "$source_dir/tts" ]] || exit 1
 previous="$(mktemp -d "$lib/previous-XXXXXXXX")"
 for file in enikk.py VERSION README.md; do
     cp -a -- "$lib/$file" "$previous/$file"
 done
+if [[ -d "$lib/tts" ]]; then
+    cp -a -- "$lib/tts" "$previous/tts"
+fi
 temporary=""
 cleanup() {
     [[ -z "$temporary" ]] || rm -f -- "$temporary"
@@ -35,6 +39,12 @@ for file in README.md VERSION enikk.py; do
     mv -f -- "$temporary" "$lib/$file"
     temporary=""
 done
+tts_temporary="$(mktemp -d "$lib/.tts.XXXXXXXX")"
+for file in README.md yuki-codex-notify.py yuki-codex-rollout-watch.py yuki-tts-engine.py yuki-f5ttl-f4dp.json; do
+    install -m 644 -- "$source_dir/tts/$file" "$tts_temporary/$file"
+done
+rm -rf -- "$lib/tts"
+mv -- "$tts_temporary" "$lib/tts"
 printf '이전 버전 보존: %s\n' "$previous"
 "${stage}${prefix}/bin/codex_enikk" --version
 printf '%s\n' '업데이트 완료. 기존 앱을 종료한 뒤 codex_enikk를 다시 실행하세요.'

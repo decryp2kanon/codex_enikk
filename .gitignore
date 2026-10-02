@@ -6,3 +6,5 @@ codex-session-*.txt
 codex-enikk-session-backups/
 작업연속성.md
 .env
+*.wav
+.codex-notify/

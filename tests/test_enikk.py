@@ -12,7 +12,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -261,8 +261,13 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
         with patch('enikk.subprocess.Popen') as launch:
             launch.return_value.wait.return_value = 0
             self.assertEqual(enikk.conversation('example-session', 42, ['-i', 'picture.png']), 0)
-            launch.assert_called_once_with(
-                ['codex', 'resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox', '--no-daemon', '-i', 'picture.png'], close_fds=True)
+            launch.assert_has_calls([
+                call([sys.executable, str(ROOT / 'tts/yuki-codex-rollout-watch.py')],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, close_fds=True),
+                call(['codex', 'resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox',
+                      '--no-daemon', '-i', 'picture.png'], close_fds=True),
+            ])
 
     def test_pty_is_passed_to_native_codex(self):
         self.run_cli(prompt='')

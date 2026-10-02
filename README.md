@@ -158,6 +158,17 @@ UTF-8 기준 200,000바이트는 목표 크기입니다. 오래된 메시지를 
 자르지 않고 온전히 보존합니다. 요약이나 LLM 호출, Dorothy API 호출은 없습니다.
 필요할 때 이 TXT를 사용자가 직접 Dorothy에게 업로드합니다.
 
+## 선택적 로컬 TTS
+
+`codex_enikk`는 설치된 TTS 의존성을 찾으면 CODEX 진행 메시지와 최종 메시지를 확정된
+유키짱 음성으로 읽습니다. 사용자 입력, reasoning, 도구 출력과 로그는 읽지 않습니다.
+Supertonic 모델과 음색은 worker 시작 시 한 번 로드하고, 문장 합성과 재생을 순서대로
+pipeline합니다. 음성 설정과 설치 요구사항은 [`tts/README.md`](tts/README.md)에 있습니다.
+
+TTS 의존성이 없거나 TTS가 실패해도 Codex TUI, 세션 연속성, 백업과 transcript는 계속
+동작합니다. Supertonic 모델 캐시, WAV, 세션 파일과 인증 정보는 저장소나 관리 설치에
+포함하지 않습니다.
+
 ## 제거 및 테스트
 
 ```bash
