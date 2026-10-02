@@ -19,6 +19,7 @@ import tarfile
 import tempfile
 import threading
 from datetime import datetime, timezone
+from latest import Mirror
 
 VERSION = '2.1.7'
 LATEST_TRANSCRIPT_FILE = None
@@ -359,7 +360,7 @@ def write_latest_transcript(path, target=200_000):
     return destination
 
 
-def export_changed(baseline, cwd, output, session_id=None):
+def export_changed(baseline, cwd, output, session_id=None, latest=True):
     for path in (codex_home() / 'sessions').rglob('*.jsonl'):
         if path.is_symlink() or not path.resolve().is_relative_to(codex_home()):
             continue
@@ -377,7 +378,7 @@ def export_changed(baseline, cwd, output, session_id=None):
         with os.fdopen(fd, 'w') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             write_transcript_parts(output, safe_id, transcript(path))
-            if session_id:
+            if session_id and latest:
                 write_latest_transcript(path)
         baseline[str(path)] = (stat.st_mtime_ns, stat.st_size)
 
@@ -690,7 +691,10 @@ def conversation(session_id, instance_fd, args=()):
     command = ['codex', 'resume', session_id, yolo, '--no-daemon', '-c', 'notify=[]', *options]
     # Inherit stdin/stdout/stderr and the foreground terminal. Do not pipe or
     # parse TUI output: doing so breaks image paste, raw input and rendering.
-    with owned_processes(), tts_run():
+    with owned_processes(), tts_run(), Mirror(
+            codex_home() / 'thread_history_1.sqlite', session_id,
+            Path.home() / 'codex-latest.txt',
+            Path(os.environ['CODEX_ENIKK_TTS_STATE']) / 'mirror-thread.json'):
         install_root = Path(__file__).resolve().parent
         tts_script = install_root / 'tts' / 'yuki-codex-rollout-watch.py'
         chatterbox_python = Path(os.environ.get('CODEX_ENIKK_CHATTERBOX_HOME',
@@ -756,7 +760,7 @@ def main(args=None):
             def watcher():
                 while not stop.wait(2):
                     try:
-                        export_changed(baseline, cwd, output, session_id)
+                        export_changed(baseline, cwd, output, session_id, latest=False)
                     except (OSError, ValueError) as exc:
                         save_errors.add(str(exc))  # Do not corrupt the active TUI.
             thread = threading.Thread(target=watcher, daemon=True)
@@ -769,7 +773,7 @@ def main(args=None):
                 thread.join()
                 for error in sorted(save_errors):
                     print(f'대화문 저장 경고: {error}', file=sys.stderr)
-                for operation in (lambda: export_changed(baseline, cwd, output, session_id), backup):
+                for operation in (lambda: export_changed(baseline, cwd, output, session_id, latest=False), backup):
                     try:
                         operation()
                     except (OSError, ValueError) as exc:

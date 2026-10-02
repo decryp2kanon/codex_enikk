@@ -36,7 +36,7 @@ cleanup() {
     fi
 }
 trap cleanup EXIT
-for file in enikk.py restore.py README.md LICENSE VERSION uninstall.sh "${commands[@]}"; do
+for file in enikk.py latest.py restore.py README.md LICENSE VERSION uninstall.sh "${commands[@]}"; do
     install -m 644 -- "$source_dir/$file" "$lib/$file"
 done
 for file in README.md setup-tts.sh yuki-chatterbox-engine.py yuki-codex-notify.py yuki-codex-rollout-watch.py yuki-codex-stream.py; do

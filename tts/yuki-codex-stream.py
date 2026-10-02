@@ -304,6 +304,30 @@ def connect(endpoint):
         raise
 
 
+def mirror_selection(event):
+    """Track the native client's selection on this private server, not deltas."""
+    method, params = event.get('method'), event.get('params', {})
+    thread = None
+    if method == 'thread/started':
+        thread = params.get('thread', {}).get('id')
+    elif method == 'turn/started':
+        thread = params.get('threadId')
+    if isinstance(thread, str) and thread:
+        path = notify.STATE / 'mirror-thread.json'
+        try:
+            if not path.exists() or json.loads(path.read_text()).get('thread') != thread:
+                # No fsync on the streaming path; the mirror polls separately.
+                fd, name = tempfile.mkstemp(dir=path.parent, prefix='.mirror-')
+                try:
+                    with os.fdopen(fd, 'w') as out:
+                        json.dump({'thread': thread}, out)
+                    os.replace(name, path)
+                finally:
+                    Path(name).unlink(missing_ok=True)
+        except (OSError, ValueError) as exc:
+            notify.log_status(f'mirror selection failed: {type(exc).__name__}')
+
+
 def observe(endpoint, thread_id, directory, ready=None, submit=None, stop=None):
     accumulator = Accumulator(directory, thread_id, submit or Publisher(), notify.log_status)
     initial = not (Path(directory) / '.baseline').exists()
@@ -342,6 +366,7 @@ def observe(endpoint, thread_id, directory, ready=None, submit=None, stop=None):
                     continue
                 if not raw: raise ConnectionError('app-server closed')
                 event = json.loads(raw)
+                mirror_selection(event)
                 # Observer never answers approval/tool RPC requests or sends turn input.
                 accumulator.event(event)
             # The wrapper keeps the server alive during this bounded drain. A

@@ -32,6 +32,17 @@ class StreamingTests(unittest.TestCase):
     def delta(self, text):
         self.event('item/agentMessage/delta', itemId='item', delta=text)
 
+    def test_mirror_tracks_thread_switch_but_never_deltas(self):
+        with patch.object(stream.notify, 'STATE', self.root):
+            stream.mirror_selection(dict(method='thread/started', params={'thread': {'id': 'B'}}))
+            path = self.root / 'mirror-thread.json'
+            self.assertEqual(json.loads(path.read_text())['thread'], 'B')
+            before = path.stat().st_mtime_ns
+            stream.mirror_selection(dict(method='item/agentMessage/delta', params={'threadId': 'A'}))
+            self.assertEqual(path.stat().st_mtime_ns, before)
+            stream.mirror_selection(dict(method='turn/started', params={'threadId': 'C'}))
+            self.assertEqual(json.loads(path.read_text())['thread'], 'C')
+
     def test_five_second_sentence_isolation(self):
         timestamps = []
         traces = []

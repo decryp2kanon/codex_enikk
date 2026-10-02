@@ -63,6 +63,7 @@ class EnikkTests(unittest.TestCase):
             # The real source keeps the production singleton; flock is still tested.
             source = source.replace('guard.bind(INSTANCE_SOCKET_PREFIX + str(os.getuid()))', 'pass')
         (self.app_root / 'enikk.py').write_text(source)
+        shutil.copy2(ROOT / 'latest.py', self.app_root / 'latest.py')
         shutil.copy2(ROOT / 'codex_enikk', self.app_root / 'codex_enikk')
         self.namespace_patch = patch.object(enikk, 'INSTANCE_SOCKET_PREFIX', namespace)
         self.namespace_patch.start()
