@@ -214,9 +214,25 @@ def speech_chunks(text, minimum=20, target=28, maximum=55):
     if current:
         # Do not leave a short sentence tail (for example, "해.") as its own
         # generation. Chatterbox frequently reports long_tail for these tiny
-        # fragments. Preserve the text by joining it to the preceding chunk.
+        # fragments. Join it to the preceding chunk, or rebalance that pair
+        # when both resulting chunks remain above the minimum length.
         if chunks and len(current) < minimum and len(chunks[-1]) + 1 + len(current) <= maximum:
-            chunks[-1] = f"{chunks[-1]} {current}"
+            joined = f"{chunks[-1]} {current}"
+            words = joined.split()
+            choices = []
+            for index in range(1, len(words)):
+                left, right = " ".join(words[:index]), " ".join(words[index:])
+                # Rebalance only when neither side becomes a short fragment.
+                if not (minimum <= len(left) <= maximum and minimum <= len(right) <= maximum):
+                    continue
+                boundary = bool(re.search(r"[,;:.!?。！？]$|(?:으며|면서|지만|며|하고|이고|하며|때문에)$",
+                                          words[index - 1]))
+                choices.append((not boundary, abs(len(left) - len(right)), index, left, right))
+            if choices:
+                _, _, _, left, right = min(choices)
+                chunks[-1:] = [left, right]
+            else:
+                chunks[-1] = joined
         else:
             chunks.append(current)
     return chunks
