@@ -13,6 +13,53 @@ spec = importlib.util.spec_from_file_location('stream', ROOT/'tts/yuki-codex-str
 stream = importlib.util.module_from_spec(spec); spec.loader.exec_module(stream)
 
 class StreamingTests(unittest.TestCase):
+    def ready_status(self, count=0, ready=True, active=True):
+        jobs = self.root / 'jobs'
+        jobs.mkdir(exist_ok=True)
+        for i in range(count):
+            (jobs / str(i)).write_text(json.dumps({'text': '문장이야.', 'run_id': 'current'}))
+        with patch.object(stream.notify, 'STATE', self.root), \
+             patch.object(stream.notify, 'engine_ready', return_value=ready), \
+             patch.object(stream.notify, 'run_active', return_value=active), \
+             patch.object(stream.time, 'monotonic_ns', return_value=17900000000), \
+             patch.dict(os.environ, {'CODEX_ENIKK_STARTUP_NS': '1000000000', 'CODEX_ENIKK_TTS_RUN_ID': 'current'}):
+            stream.report_engine_ready()
+        path = self.root / 'runtime.log'
+        return path.read_text() if path.exists() else ''
+
+    def test_ready_status_once(self):
+        self.assertEqual(len(self.ready_status().splitlines()), 1)
+
+    def test_ready_status_elapsed(self):
+        self.assertIn('Yuki TTS ready (16.9s)', self.ready_status())
+
+    def test_ready_status_no_pending(self):
+        self.assertNotIn('queued', self.ready_status())
+
+    def test_ready_status_singular(self):
+        self.assertEqual(self.ready_status(1), 'Yuki TTS ready (16.9s) — 1 queued sentence\n')
+
+    def test_ready_status_plural(self):
+        self.assertEqual(self.ready_status(3), 'Yuki TTS ready (16.9s) — 3 queued sentences\n')
+
+    def test_ready_status_repeated_signal(self):
+        first = self.ready_status()
+        self.assertEqual(self.ready_status(), first)
+
+    def test_ready_status_failure_or_cancelled(self):
+        self.assertEqual(self.ready_status(ready=False), '')
+        self.assertEqual(self.ready_status(active=False), '')
+
+    def test_ready_status_excludes_old_and_terminal(self):
+        jobs = self.root / 'jobs'; jobs.mkdir()
+        (jobs / 'old').write_text(json.dumps({'text': '옛 문장.', 'run_id': 'old'}))
+        (jobs / '.played-hidden').write_text(json.dumps({'text': '완료.', 'run_id': 'current'}))
+        (jobs / 'done').write_text(json.dumps({'text': '완료.', 'run_id': 'current',
+            'delivery': {'parts': ['완료.'], 'terminal': {'0': 'PLAYED'}}}))
+        (jobs / 'partial').write_text(json.dumps({'text': '아직 남아 있어.', 'run_id': 'current',
+            'delivery': {'parts': ['앞.', '뒤.'], 'terminal': {'0': 'PLAYED'}}}))
+        self.assertIn('1 queued sentence\n', self.ready_status())
+
     def test_connect_avoids_duplicate_utf8_validation(self):
         import sys
         from unittest.mock import Mock
@@ -87,7 +134,7 @@ class StreamingTests(unittest.TestCase):
         environment = patch.dict(os.environ)
         environment.start(); self.addCleanup(environment.stop)
         for key in list(os.environ):
-            if key.startswith('CODEX_ENIKK_TTS_'):
+            if key.startswith('CODEX_ENIKK_TTS_') or key == 'CODEX_ENIKK_STARTUP_NS':
                 os.environ.pop(key)
         logger = patch.object(stream.notify, 'log_status')
         logger.start(); self.addCleanup(logger.stop)

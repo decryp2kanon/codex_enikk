@@ -744,6 +744,7 @@ def streaming_tts(session_id, python, script):
                 # Keep exceptions from the native TUI body out of startup fallback.
                 if endpoint_ready:
                     tts_status('streaming', 'ready')
+                    print(f"Yuki TTS readiness log: {os.environ['CODEX_ENIKK_TTS_STATE']}/runtime.log (tail -f in another terminal)", file=sys.stderr)
                 yield endpoint_ready
             finally:
                 # Cancel audio before waiting for helper shutdown/snapshot work.
@@ -817,6 +818,7 @@ def conversation(session_id, instance_fd, args=()):
 
 
 def main(args=None):
+    os.environ['CODEX_ENIKK_STARTUP_NS'] = str(time.monotonic_ns())
     args = list(sys.argv[1:] if args is None else args)
     if args in (['--help'], ['-h']):
         print(HELP)

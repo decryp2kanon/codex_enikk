@@ -62,6 +62,14 @@ current-run pending content without blocking Codex; server/helper startup failur
 the standalone path. Historical ignored turn IDs are saved once, without per-item checkpoints. Runtime mode is also saved
 in the current run's `runtime.log`; timings and subscription details are in `notify.log`.
 
+Before the native TUI opens, the wrapper prints the current run's readiness log path.
+Use `tail -f <that-path>` in another terminal to watch for
+`Yuki TTS ready (16.9s)` (with `— N queued sentences` when applicable).
+This line is emitted once per run only after the existing model-ready handshake;
+elapsed time starts at wrapper entry, and the count covers current-run sentences
+not yet terminal at observation time. Status goes only to `runtime.log`, never to
+the native TUI terminal, conversation history, or `codex-latest.txt`.
+
 The private server owns the existing unrestricted permission policy because
 remote resume rejects CLI permission overrides. Its `notify=[]` override disables
 the global completed-answer hook; the JSONL watcher is not started in remote mode.

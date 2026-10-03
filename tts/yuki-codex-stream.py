@@ -402,6 +402,38 @@ def observe(endpoint, thread_id, directory, ready=None, submit=None, stop=None):
             if ws is not None: ws.close()
 
 
+def report_engine_ready():
+    """One run-local status line; never write into the native TUI's terminal."""
+    started = os.environ.get('CODEX_ENIKK_STARTUP_NS')
+    if not started or not notify.run_active() or not notify.engine_ready():
+        return
+    elapsed = (time.monotonic_ns() - int(started)) / 1e9
+    pending = 0
+    for path in (notify.STATE / 'jobs').glob('*'):
+        if path.name.startswith('.'):
+            continue
+        try:
+            job = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue  # Atomic job publication/cleanup may race this read.
+        terminal = job.get('delivery', {}).get('terminal', {})
+        if (job.get('run_id') == os.environ.get('CODEX_ENIKK_TTS_RUN_ID')
+                and job.get('text', '').strip()
+                and not (terminal and len(terminal) == len(job.get('delivery', {}).get('parts', [job['text']]))
+                         and all(v in ('PLAYED', 'FAILED_EXPLICITLY') for v in terminal.values()))):
+            pending += 1
+    message = f'Yuki TTS ready ({elapsed:.1f}s)'
+    if pending:
+        message += f" — {pending} queued sentence{'s' if pending != 1 else ''}"
+    with (notify.STATE / 'runtime.log').open('a+', encoding='utf-8') as out:
+        fcntl.flock(out, fcntl.LOCK_EX)
+        out.seek(0)
+        if 'Yuki TTS ready (' in out.read() or not notify.run_active() or not notify.engine_ready():
+            return
+        out.write(message + '\n')
+        out.flush()
+
+
 def monitor_engine(stop):
     """Observe model warmup without blocking the subscription or native TUI."""
     deadline = time.monotonic() + 60
@@ -411,6 +443,10 @@ def monitor_engine(stop):
             return
         if notify.engine_ready():
             notify.log_status(f"TTS_READY monotonic_ns={time.monotonic_ns()}")
+            try:
+                report_engine_ready()
+            except (OSError, ValueError) as exc:
+                notify.log_status(f"TTS_STATUS_FAILED reason={type(exc).__name__}")
             return
         if time.monotonic() >= deadline:
             notify.log_status("TTS_READY_FAILED reason=readiness_timeout pending=current_run_preserved")
