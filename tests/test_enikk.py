@@ -32,6 +32,12 @@ SOCKET_BIND_AVAILABLE = can_bind_abstract_socket()
 
 
 class EnikkTests(unittest.TestCase):
+    def test_supported_codex_versions(self):
+        self.assertTrue(enikk.supported_codex_version('codex-cli 0.158.0\n'))
+        self.assertTrue(enikk.supported_codex_version('codex-cli 0.160.0\n'))
+        self.assertFalse(enikk.supported_codex_version('codex-cli 0.161.0'))
+        self.assertFalse(enikk.supported_codex_version('codex-cli 0.160.0-beta'))
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)

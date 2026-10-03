@@ -313,7 +313,7 @@ def smoke(binary, root, environment, model, checks):
 
 
 def execute(args):
-    from enikk import owned_processes, process_table
+    from enikk import owned_processes, process_table, SUPPORTED_CODEX_VERSIONS
     started=time.monotonic();checks=Checks();report={'binary':str(args.binary),'version':None,'checks':checks.checks,'failure_reason':None}
     root=None;binary=None;before=None;previous=signal.getsignal(signal.SIGALRM)
     children_before=set(process_table())
@@ -345,7 +345,7 @@ def execute(args):
                                               stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=5)
                 report['stable_version']=stable_version.stdout.strip()
             smoke(binary,root,environment,args.model,checks)
-            pins=set(re.findall(r"version\.stdout\.strip\(\) == 'codex-cli ([^']+)'",(ROOT/'enikk.py').read_text()))
+            pins=SUPPORTED_CODEX_VERSIONS
             checks.check('wrapper version gate',lambda:require(report['version'] in pins,{'allowed_versions':sorted(pins)},report['version']))
     except (Exception,KeyboardInterrupt,SystemExit) as exc:
         report['failure_reason']=f'{type(exc).__name__}: {exc}'

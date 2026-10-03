@@ -25,6 +25,13 @@ from latest import Mirror
 from persistence import DATABASES, snapshots, validate_database, validate_rollouts
 
 VERSION = '2.1.7'
+SUPPORTED_CODEX_VERSIONS = frozenset({'0.158.0', '0.160.0'})
+
+
+def supported_codex_version(output):
+    return output.strip() in {f'codex-cli {version}' for version in SUPPORTED_CODEX_VERSIONS}
+
+
 LATEST_TRANSCRIPT_FILE = None
 TRANSCRIPT_PART_BYTES = 10_000_000
 INSTANCE_SOCKET_PREFIX = '\0codex_enikk.instance.'
@@ -682,8 +689,8 @@ def streaming_tts(session_id, python, script):
         version = subprocess.run(['codex', '--version'], capture_output=True, text=True, timeout=5)
         dependency = subprocess.run([str(python), '-c', 'import websocket'],
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
-        supported = version.returncode == 0 and version.stdout.strip() == 'codex-cli 0.158.0' and dependency.returncode == 0
-        unsupported_reason = ('unsupported_codex_version' if version.returncode != 0 or version.stdout.strip() != 'codex-cli 0.158.0'
+        supported = version.returncode == 0 and supported_codex_version(version.stdout) and dependency.returncode == 0
+        unsupported_reason = ('unsupported_codex_version' if version.returncode != 0 or not supported_codex_version(version.stdout)
                               else 'websocket_dependency_unavailable')
     except (OSError, subprocess.SubprocessError) as exc:
         supported = False
