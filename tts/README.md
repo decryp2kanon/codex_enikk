@@ -7,7 +7,7 @@ The external runtime defaults to `~/Apps/chatterbox-yuki` and requires:
 
 - `.venv/bin/python` with `chatterbox-tts==0.1.7`
 - `yuki_super-clean.wav`
-- ALSA `aplay`
+- PulseAudio `paplay` (`pulseaudio-utils`), using the existing default sink
 
 The fixed voice is SUPER-CLEAN C2: Korean, exaggeration `0.50`, and CFG weight `0.70`.
 Failures reset conditioning and retry once. After two failed generation attempts, the chunk
@@ -40,7 +40,7 @@ audible playback and acknowledgement can still repeat that chunk in that same ru
 
 Normal exit marks the run cancelled. A worker watchdog validates its owner's PID and process
 start time; owner death or cancellation terminates the worker's private process group,
-including `aplay`. Startup cancels prior runs and stops their identity-checked worker groups.
+including `paplay`. Startup cancels prior runs and stops their identity-checked worker groups.
 Old files remain for diagnosis but are excluded from all new-run delivery. One global model
 lock prevents simultaneous GPU models, while each run has its own launch lock.
 
