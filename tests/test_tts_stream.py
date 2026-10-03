@@ -140,6 +140,8 @@ class StreamingTests(unittest.TestCase):
         logger.start(); self.addCleanup(logger.stop)
         self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name); self.jobs = []
+        state_patch = patch.object(stream.notify, 'STATE', self.root)
+        state_patch.start(); self.addCleanup(state_patch.stop)
         self.a = stream.Accumulator(self.root, 'thread', self.jobs.append)
         self.event('item/started', item=dict(type='agentMessage', id='item', phase='final_answer'))
 

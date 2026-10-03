@@ -13,6 +13,7 @@ import threading
 import time
 import types
 import unittest
+from contextlib import nullcontext
 from unittest.mock import Mock, patch
 
 SOURCE = Path(__file__).resolve().parents[1] / 'tts/yuki-chatterbox-engine.py'
@@ -20,7 +21,7 @@ SOURCE = Path(__file__).resolve().parents[1] / 'tts/yuki-chatterbox-engine.py'
 
 def definitions():
     tree = ast.parse(SOURCE.read_text())
-    names = {'DeliveryJob', 'playback', 'run', 'GenerationWarnings',
+    names = {'DeliveryJob', 'playback', 'play_audio', 'run', 'GenerationWarnings',
              'sentences', 'speech_chunks', 'segment_drop_reason', 'recovery_clauses', 'recover_generation',
              'normalize_paths', 'korean_pronunciation', 'normalize_numbers', 'korean_integer', 'korean_number',
              'owner_alive', 'discard_stale_job'}
@@ -31,8 +32,15 @@ def definitions():
     tree.body = assignments + tree.body
     scope = dict(Path=Path, os=os, tempfile=tempfile, json=json, threading=threading,
                  time=time, subprocess=types.SimpleNamespace(run=Mock(), DEVNULL=subprocess.DEVNULL),
-                 queue=queue, logging=logging, fcntl=fcntl, re=re, log=Mock())
+                 queue=queue, logging=logging, fcntl=fcntl, re=re, log=Mock(), STATE=Path('/unused'),
+                 notify=types.SimpleNamespace(epoch_valid=lambda *args: True, epoch_lock=lambda *args: nullcontext()))
     exec(compile(tree, str(SOURCE), 'exec'), scope)
+    scope['real_play_audio'] = scope['play_audio']
+    # Existing delivery tests inject a synchronous CPU playback operation.
+    def simulated_audio(job, path):
+        scope['subprocess'].run(['/usr/bin/aplay', '-q', path], check=True)
+        return 'played'
+    scope['play_audio'] = simulated_audio
     return scope
 
 

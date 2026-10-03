@@ -117,6 +117,7 @@ class Accumulator:
             path = self.path(*key)
             self.items[key] = json.loads(path.read_text()) if path.exists() else dict(
                 turn=turn, item=item, text='', consumed=0, completed=False,
+                epoch=notify.current_epoch().get('epoch'),
                 interrupted=False, phase=None, outbox=[])
         return self.items[key]
 
@@ -142,6 +143,7 @@ class Accumulator:
             if text and any(ch.isalnum() for ch in text):
                 key = hashlib.sha256(f"{self.thread_id}\0{state['turn']}\0{state['item']}\0{begin}\0{end}".encode()).hexdigest()
                 job = dict(id=key[:12], stream_key=key, text=text,
+                           epoch=state.get('epoch'),
                            run_id=os.environ.get('CODEX_ENIKK_TTS_RUN_ID'),
                            queued_ns=time.monotonic_ns(),
                            sentence_complete_ns=complete_ns,
@@ -198,10 +200,24 @@ class Accumulator:
                     state = self.state(saved['turn'], saved['item'])
                     state['needs_snapshot'] = True
                     self.save(state)
+        # Reconcile the latest submitted user before replaying any old outbox.
+        if not initial:
+            users = [(turn['id'], item['id']) for turn in thread.get('turns', [])
+                     if turn['id'] not in self.baseline for item in turn.get('items', [])
+                     if item.get('type') == 'userMessage']
+            if users:
+                turn, user = users[-1]
+                notify.advance_epoch(self.thread_id, turn, user,
+                                     notify.user_ordinal(self.thread_id, turn, user))
         for turn in thread.get('turns', []):
             if not initial and turn['id'] in self.baseline:
                 continue
+            snapshot_epoch = None
             for item in turn.get('items', []):
+                if item.get('type') == 'userMessage':
+                    snapshot_epoch = item['id']
+                if item.get('type') == 'agentMessage' and not self.path(turn['id'], item['id']).exists():
+                    self.state(turn['id'], item['id'])['epoch'] = snapshot_epoch
                 self.snapshot_item(turn['id'], item, turn.get('status'), baseline=initial)
         # Completed states remain on disk, not in an ever-growing memory cache.
         self.items = {k:v for k,v in self.items.items() if not v['completed'] and not v['interrupted']}
@@ -215,8 +231,17 @@ class Accumulator:
             return
         if method == 'turn/started':
             self.log(f"RESPONSE_START turn={p['turn']['id']} monotonic_ns={time.monotonic_ns()}")
+            for item in p['turn'].get('items', []):
+                if item.get('type') == 'userMessage':
+                    notify.advance_epoch(self.thread_id, p['turn']['id'], item['id'],
+                                         notify.user_ordinal(self.thread_id, p['turn']['id'], item['id']))
         if method in ('item/started', 'item/completed'):
             item = p['item']
+            if item.get('type') == 'userMessage':
+                self.log(f"USER_SUBMIT_EVENT item={item['id']} turn={p['turnId']} monotonic_ns={time.monotonic_ns()}")
+                notify.advance_epoch(self.thread_id, p['turnId'], item['id'],
+                                     notify.user_ordinal(self.thread_id, p['turnId'], item['id']))
+                return
             if item.get('type') != 'agentMessage':
                 return
             state = self.state(p['turnId'], item['id'])
@@ -273,6 +298,9 @@ class Publisher:
         if current_run and job.get('run_id') != current_run:
             notify.log_status(f"stale job blocked job={job['id']} run_id={job.get('run_id')}")
             return
+        if not notify.epoch_valid(job, self.state):
+            notify.log_status(f"stale epoch publication blocked job={job['id']}")
+            return
         path = self.jobs / job['filename']
         # The engine archives stream delivery receipts before removing queue entries.
         if path.exists() or path.with_name('.played-' + path.name).exists() or path.with_name('.failed-' + path.name).exists():
@@ -282,10 +310,13 @@ class Publisher:
             with os.fdopen(fd, 'w', encoding='utf-8') as out:
                 json.dump(job, out, ensure_ascii=False)
                 out.flush(); os.fsync(out.fileno())
-            try:
-                os.link(name, path)  # Never overwrite an in-flight delivery checkpoint.
-            except FileExistsError:
-                return
+            with notify.epoch_lock(self.state):
+                if not notify.epoch_valid(job, self.state):
+                    return
+                try:
+                    os.link(name, path)  # Never overwrite an in-flight delivery checkpoint.
+                except FileExistsError:
+                    return
             fd = os.open(self.jobs, os.O_RDONLY | os.O_DIRECTORY)
             try: os.fsync(fd)
             finally: os.close(fd)
@@ -341,7 +372,6 @@ def observe(endpoint, thread_id, directory, ready=None, submit=None, stop=None):
     while stop is None or not stop.is_set():
         ws = None
         try:
-            accumulator.recover()
             ws = connect(endpoint)
             ws.send(json.dumps(dict(id=1, method='initialize', params=dict(clientInfo=dict(name='codex_enikk_tts', version='1')))))
             while True:
@@ -360,6 +390,7 @@ def observe(endpoint, thread_id, directory, ready=None, submit=None, stop=None):
             if initial:
                 atomic_json(Path(directory) / '.baseline', {'initialized': True, 'ignored_turns': sorted(accumulator.baseline)})
             initial = False
+            accumulator.recover()
             if ready:
                 atomic_json(Path(ready), dict(thread=thread_id, ready=True,
                             run_id=os.environ.get('CODEX_ENIKK_TTS_RUN_ID'), state=str(notify.STATE),
@@ -418,6 +449,7 @@ def report_engine_ready():
             continue  # Atomic job publication/cleanup may race this read.
         terminal = job.get('delivery', {}).get('terminal', {})
         if (job.get('run_id') == os.environ.get('CODEX_ENIKK_TTS_RUN_ID')
+                and notify.epoch_valid(job)
                 and job.get('text', '').strip()
                 and not (terminal and len(terminal) == len(job.get('delivery', {}).get('parts', [job['text']]))
                          and all(v in ('PLAYED', 'FAILED_EXPLICITLY') for v in terminal.values()))):

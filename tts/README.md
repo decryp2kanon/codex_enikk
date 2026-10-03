@@ -70,6 +70,17 @@ elapsed time starts at wrapper entry, and the count covers current-run sentences
 not yet terminal at observation time. Status goes only to `runtime.log`, never to
 the native TUI terminal, conversation history, or `codex-latest.txt`.
 
+Submitting a new user message advances a run-local speech epoch, identified by
+the protocol user item and turn IDs. It cancels only previous speech: the exact
+active playback child is stopped, old pending jobs become stale, and late GPU
+results cannot enter playback. In-flight GPU inference is allowed to finish;
+old retry/split work stops at the next boundary without reloading the model.
+Typing alone does not cancel speech. Reconnect snapshots reconcile the latest
+user before replaying any outbox; persisted user ordinals reject older events.
+READY counts only current-epoch pending sentences. Conversation text, history,
+backup, and the latest mirror are unaffected. Cancellation receipts remain as
+hidden `.stale-*` runtime files and are never automatically replayed.
+
 The private server owns the existing unrestricted permission policy because
 remote resume rejects CLI permission overrides. Its `notify=[]` override disables
 the global completed-answer hook; the JSONL watcher is not started in remote mode.

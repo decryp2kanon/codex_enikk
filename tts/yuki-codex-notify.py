@@ -10,6 +10,9 @@ import re
 import subprocess
 import sys
 import time
+import sqlite3
+import tempfile
+from contextlib import contextmanager
 from datetime import datetime
 
 
@@ -18,6 +21,71 @@ STATE = Path(os.environ.get("CODEX_ENIKK_TTS_STATE", Path(os.environ.get("XDG_ST
 SEEN = STATE / "seen"
 JOBS = STATE / "jobs"
 LOG = STATE / "notify.log"
+
+
+@contextmanager
+def epoch_lock(state=None):
+    state = Path(state or STATE)
+    state.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with (state / 'epoch.lock').open('a+b') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def current_epoch(state=None):
+    try:
+        return json.loads((Path(state or STATE) / 'epoch.json').read_text())
+    except FileNotFoundError:
+        return {}
+
+
+def epoch_valid(job, state=None):
+    active = current_epoch(state)
+    return not active or (job.get('epoch') == active['epoch'] and
+                          job.get('source', {}).get('thread') == active['thread'] and
+                          job.get('source', {}).get('turn') == active['turn'])
+
+
+def user_ordinal(thread, turn, item):
+    """Use persisted protocol order when replayed events arrive out of order."""
+    db = Path(os.environ.get('CODEX_HOME', Path.home() / '.codex')) / 'thread_history_1.sqlite'
+    try:
+        with sqlite3.connect(db.as_uri() + '?mode=ro', uri=True, timeout=.1) as conn:
+            row = conn.execute('SELECT rollout_ordinal FROM thread_items WHERE thread_id=? AND turn_id=? AND item_id=?',
+                               (thread, turn, item)).fetchone()
+            return row[0] if row else None
+    except (sqlite3.Error, ValueError):
+        return None
+
+
+def advance_epoch(thread, turn, user, ordinal=None, state=None):
+    state = Path(state or STATE)
+    with epoch_lock(state):
+        old = current_epoch(state)
+        seen = old.get('seen_users', [])
+        # Persistence may lag item/started; resolve the active user's ordinal
+        # again before comparing a later replay, rather than accepting it blind.
+        if old and old.get('ordinal') is None:
+            old['ordinal'] = user_ordinal(old['thread'], old['turn'], old['epoch'])
+        if user in seen or (old.get('thread') == thread and ordinal is not None and
+                            old.get('ordinal') is not None and ordinal <= old['ordinal']):
+            return False
+        if turn in old.get('retired_turns', []):
+            return False
+        retired = old.get('retired_turns', [])
+        if old.get('turn') and old['turn'] != turn:
+            retired = retired + [old['turn']]
+        value = dict(epoch=user, thread=thread, turn=turn, ordinal=ordinal,
+                     seen_users=seen + [user], retired_turns=retired, submitted_ns=time.monotonic_ns())
+        fd, name = tempfile.mkstemp(dir=state, prefix='.epoch-')
+        try:
+            with os.fdopen(fd, 'w') as out:
+                json.dump(value, out); out.flush(); os.fsync(out.fileno())
+            os.replace(name, state / 'epoch.json')
+        finally:
+            Path(name).unlink(missing_ok=True)
+        log_status(f"USER_SUBMIT epoch={user} turn={turn} monotonic_ns={value['submitted_ns']}")
+        return True
 
 
 def clean_text(text):

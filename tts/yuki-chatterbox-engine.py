@@ -2,6 +2,7 @@
 """Persistent Chatterbox C2 worker using CUDA when available."""
 
 import fcntl
+import importlib.util
 import json
 import logging
 import os
@@ -24,6 +25,9 @@ from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
 
 ROOT = Path(__file__).resolve().parent
+_notify_spec = importlib.util.spec_from_file_location('engine_notify', ROOT / 'yuki-codex-notify.py')
+notify = importlib.util.module_from_spec(_notify_spec)
+_notify_spec.loader.exec_module(notify)
 STATE = Path(os.environ.get("CODEX_ENIKK_TTS_STATE", Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "codex_enikk" / "tts"))
 JOBS = STATE / "jobs"
 # The final SUPER-CLEAN C2 reference is configured here (and may be overridden
@@ -242,7 +246,7 @@ def recovery_clauses(text):
     return parts
 
 
-def recover_generation(text, attempt, reset, join, trace):
+def recover_generation(text, attempt, reset, join, trace, valid=lambda: True):
     """At most 2 original + 2 attempts per each of 2 depth-1 clauses.
 
     Publish nothing until every clause succeeds. The original delivery index
@@ -251,11 +255,16 @@ def recover_generation(text, attempt, reset, join, trace):
     def twice(segment, depth, clause):
         reasons = []
         for number in (1, 2):
+            if not valid():
+                return None, ['STALE']
             payload, reason = attempt(segment, number, depth, clause)
+            if not valid():
+                return None, ['STALE']
             if payload is not None:
                 return payload, reasons
             reasons.append(reason)
-            reset()
+            if valid():
+                reset()
         return None, reasons
 
     payload, reasons = twice(text, 0, 0)
@@ -402,7 +411,10 @@ class DeliveryJob:
 
     def _cleanup_if_complete(self):
         if all(str(i) in self.terminal for i in range(len(self.parts))):
-            if any(status != "PLAYED" for status in self.terminal.values()):
+            if any(status == 'STALE' for status in self.terminal.values()):
+                os.replace(self.path, self.path.with_name('.stale-' + self.path.name))
+                log(f"Chatterbox job_stale job={self.item['id']}")
+            elif any(status != "PLAYED" for status in self.terminal.values()):
                 failed_path = self.path.with_name(".failed-" + self.path.name)
                 os.replace(self.path, failed_path)
                 log(f"Chatterbox job_failed job={self.item['id']} recoverable={failed_path}")
@@ -418,11 +430,42 @@ class DeliveryJob:
 
     def finish(self, number, status, reason=None):
         with self.lock:
-            self.terminal[str(number)] = "PLAYED" if status == "played" else "FAILED_EXPLICITLY"
+            self.terminal[str(number)] = 'STALE' if status == 'stale' else ("PLAYED" if status == "played" else "FAILED_EXPLICITLY")
             if status != "played":
                 self.item["delivery"].setdefault("failures", {})[str(number)] = reason or status
             self._save()
             self._cleanup_if_complete()
+
+
+def play_audio(job, path):
+    # Serialize the last validity check and spawn with the user barrier commit.
+    with notify.epoch_lock(STATE):
+        if not notify.epoch_valid(job.item, STATE):
+            return 'stale'
+        child = subprocess.Popen(['/usr/bin/aplay', '-q', path],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        while child.poll() is None:
+            if not notify.epoch_valid(job.item, STATE):
+                child.terminate()  # Only this worker's exact playback child.
+                try:
+                    child.wait(timeout=.2)
+                except subprocess.TimeoutExpired:
+                    child.kill(); child.wait()
+                log(f"Chatterbox playback_stopped job={job.item['id']} epoch={job.item.get('epoch')} monotonic_ns={time.monotonic_ns()}")
+                return 'stale'
+            time.sleep(.02)
+        if not notify.epoch_valid(job.item, STATE):
+            return 'stale'
+        if child.returncode:
+            raise subprocess.CalledProcessError(child.returncode, child.args)
+        return 'played'
+    finally:
+        if child.poll() is None:
+            child.terminate()
+            try: child.wait(timeout=.2)
+            except subprocess.TimeoutExpired:
+                child.kill(); child.wait()
 
 
 def playback(ready):
@@ -437,14 +480,15 @@ def playback(ready):
         status = "playback_failed"
         failure_reason = None
         try:
+            if not notify.epoch_valid(job.item, STATE):
+                status = 'stale'
+                continue
             started = time.monotonic()
             gap = 0.0 if previous_end is None else max(0.0, started - previous_end)
             log(f"Chatterbox playback start job={job_id} part={number} queue_wait={started-generated:.3f}s previous_gap={gap:.3f}s audio={audio_duration:.2f}s monotonic={started:.6f}")
             if number == 0:
                 log(f"Chatterbox first audio latency {(time.monotonic_ns()-queued_ns)/1e9:.3f}s job={job_id}")
-            subprocess.run(["/usr/bin/aplay", "-q", path], check=True,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            status = "played"
+            status = play_audio(job, path)
         except Exception as exc:
             failure_reason = f"{type(exc).__name__}: {exc}"
             # An item failure must not terminate the queue consumer.
@@ -481,7 +525,7 @@ def owner_alive(owner):
 
 def discard_stale_job(path, item):
     current_run = os.environ.get('CODEX_ENIKK_TTS_RUN_ID')
-    if current_run and item.get('run_id') != current_run:
+    if (current_run and item.get('run_id') != current_run) or not notify.epoch_valid(item, STATE):
         path.rename(path.with_name('.stale-' + path.name))
         log(f"Chatterbox stale_discard job={item.get('id')} run_id={item.get('run_id')}")
         return True
@@ -561,6 +605,9 @@ def run():
                 for number, sentence in enumerate(job.parts):
                     if str(number) in job.terminal:
                         continue
+                    if not notify.epoch_valid(item, STATE):
+                        job.finish(number, 'stale')
+                        continue
                     # Final defense at the synthesis boundary, independent of the splitter.
                     reason = segment_drop_reason(sentence)
                     if reason:
@@ -572,14 +619,19 @@ def run():
                         log(f"Chatterbox job={item['id']} part={number} monotonic={time.monotonic():.6f} {message}")
 
                     def reset():
+                        if not notify.epoch_valid(item, STATE):
+                            return
                         reset_start = time.monotonic()
                         torch.cuda.empty_cache()
                         model.prepare_conditionals(str(REFERENCE), exaggeration=0.50)
                         trace(f"conditioning_reset duration={time.monotonic()-reset_start:.6f}s reference={REFERENCE} state={conditioning_state(model)}")
 
                     def attempt(segment, attempt_number, depth, clause):
-                        started = time.monotonic()
-                        trace(f"generate_start attempt={attempt_number} depth={depth} clause={clause} text_len={len(segment)} tokens={len(segment.split())} text={segment!r}")
+                        with notify.epoch_lock(STATE):
+                            if not notify.epoch_valid(item, STATE):
+                                return None, 'STALE'
+                            started = time.monotonic()
+                            trace(f"generate_start attempt={attempt_number} depth={depth} clause={clause} text_len={len(segment)} tokens={len(segment.split())} text={segment!r}")
                         warnings = GenerationWarnings()
                         anomaly_logger = logging.getLogger("chatterbox.models.t3.inference.alignment_stream_analyzer")
                         anomaly_logger.addHandler(warnings)
@@ -592,6 +644,8 @@ def run():
                             return None, reason
                         finally:
                             anomaly_logger.removeHandler(warnings)
+                        if not notify.epoch_valid(item, STATE):
+                            return None, 'STALE'
                         raw_duration = wav.shape[-1] / model.sr
                         wav, leading, trailing = trim_edge_silence(wav, model.sr)
                         rejected, waveform_reason, duration = suspicious_audio(wav, model.sr, segment)
@@ -614,7 +668,11 @@ def run():
                     accepted, last_failure = recover_generation(
                         sentence, attempt, reset,
                         lambda pieces: (torch.cat([piece[0] for piece in pieces], dim=-1),
-                                        sum(piece[1] for piece in pieces)), trace)
+                                        sum(piece[1] for piece in pieces)), trace,
+                        valid=lambda: notify.epoch_valid(item, STATE))
+                    if not notify.epoch_valid(item, STATE):
+                        job.finish(number, 'stale')
+                        continue
                     if accepted is None:
                         trace(f"chunk_failed engine=chatterbox final=FAILED_EXPLICITLY reason={last_failure!r}")
                         job.finish(number, "generation_failed", last_failure)
@@ -625,7 +683,12 @@ def run():
                     torchaudio.save(output.name, wav, model.sr)
                     generated = time.monotonic()
                     log(f"Chatterbox generate done job={item['id']} part={number} generation={generated-began:.3f}s audio={duration:.2f}s")
-                    ready.put((job, number, output.name, item["queued_ns"], generated, duration))
+                    with notify.epoch_lock(STATE):
+                        if not notify.epoch_valid(item, STATE):
+                            Path(output.name).unlink(missing_ok=True)
+                            job.finish(number, 'stale')
+                            continue
+                        ready.put((job, number, output.name, item["queued_ns"], generated, duration))
                     log(f"Chatterbox playback queued job={item['id']} part={number} final=queued")
             time.sleep(0.05)
 
