@@ -91,6 +91,7 @@ transcript에 identity를 복제하거나 별도의 LLM 호출을 하지 않습�
 - 백업은 `backups/`, 10 MB 분할 대화문은 `transcripts/`, Dorothy 전달용 파일은
   `latest/`에 저장합니다. 현재 작업 폴더와 Git 저장소 안에는 만들지 않습니다.
 - 시작 전과 정상 종료 시 `backups/`에 날짜별 `.tar.gz`를 생성합니다. 자동 삭제하지 않습니다.
+  시작 지연을 줄이기 위해 gzip 압축 수준 1을 사용하며, 백업 내용·SQLite snapshot·검증·원자적 저장 정책은 유지합니다.
 - `$CODEX_HOME`(기본 `~/.codex`)의 `sessions/`, `archived_sessions/` 아래 JSONL,
   `history.jsonl`, `session_index.jsonl`, `enikk-continuity.json`을 저장합니다.
 - Codex 0.158.0의 `state_5.sqlite`와 `thread_history_1.sqlite`도 있으면 포함합니다.

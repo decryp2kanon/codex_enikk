@@ -44,18 +44,22 @@ including `aplay`. Startup cancels prior runs and stops their identity-checked w
 Old files remain for diagnosis but are excluded from all new-run delivery. One global model
 lock prevents simultaneous GPU models, while each run has its own launch lock.
 
-## Sentence streaming (default for Codex 0.158.0)
+## Sentence streaming (Codex 0.158.0 / 0.160.0)
 
-The wrapper starts a private Codex **0.158.0** app-server and a sentence observer
+The wrapper starts a private supported Codex app-server and a sentence observer
 by default, retaining the native TUI. Set `CODEX_ENIKK_STREAMING_TTS=0`
 for standalone `--no-daemon` and the completed-message watcher. Other
 Codex versions, missing dependencies, or startup failures use that existing path.
 Setup pins `websocket-client==1.9.0` in the existing Chatterbox venv. Install/update
 copy the helper; reference, existing venv and model cache are preserved.
 Startup reports `tts_mode=starting`, then `streaming` or `legacy_fallback` with a reason.
-The helper confirms model/reference readiness before the native streaming TUI opens; model
-loading is paid at startup rather than hidden behind the first submitted sentence. Startup
-is bounded, and readiness failure falls back to standalone Codex. Runtime mode is also saved
+The helper subscribes and records the historical turn baseline before opening the native TUI.
+Model/reference loading runs concurrently: `streaming` means the observer is connected, while
+`TTS_READY` in `notify.log` records audio readiness separately. Sentences arriving before audio
+readiness are durably queued in the current run and consumed in order by its worker. They are
+never replayed in a later run. A model readiness timeout logs `TTS_READY_FAILED` and preserves
+current-run pending content without blocking Codex; server/helper startup failure still uses
+the standalone path. Historical ignored turn IDs are saved once, without per-item checkpoints. Runtime mode is also saved
 in the current run's `runtime.log`; timings and subscription details are in `notify.log`.
 
 The private server owns the existing unrestricted permission policy because

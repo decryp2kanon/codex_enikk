@@ -13,6 +13,76 @@ spec = importlib.util.spec_from_file_location('stream', ROOT/'tts/yuki-codex-str
 stream = importlib.util.module_from_spec(spec); spec.loader.exec_module(stream)
 
 class StreamingTests(unittest.TestCase):
+    def test_connect_avoids_duplicate_utf8_validation(self):
+        import sys
+        from unittest.mock import Mock
+        websocket=Mock()
+        with patch.dict(sys.modules, {'websocket':websocket}), patch.object(stream.socket,'socket') as socket:
+            result=stream.connect('/private/socket')
+        socket.return_value.connect.assert_called_once_with('/private/socket')
+        self.assertTrue(websocket.create_connection.call_args.kwargs['skip_utf8_validation'])
+        self.assertEqual(result,websocket.create_connection.return_value)
+
+    def test_initial_history_uses_turn_manifest_not_item_files(self):
+        history={'turns':[{'id': 'old', 'status':'completed', 'items':[
+            {'id':str(i), 'type':'agentMessage', 'phase':'final_answer', 'text':'이전 대화야.'}
+            for i in range(1000)]}]}
+        self.a.snapshot(history, initial=True)
+        self.assertEqual(self.a.baseline, {'old'})
+        self.assertEqual(list(self.root.glob('*.json')), [])
+        stream.atomic_json(self.root/'.baseline', {'ignored_turns':['old']})
+        restarted=stream.Accumulator(self.root,'thread',self.jobs.append)
+        restarted.snapshot(history, reconnecting=True)
+        self.assertEqual(self.jobs, [])
+
+    def test_model_not_ready_does_not_delay_subscription(self):
+        import sys
+        from unittest.mock import Mock
+        for failure in (None, OSError('fixture unavailable')):
+            with self.subTest(failure=failure), patch.object(stream.notify,'STATE',self.root), \
+                 patch.object(stream.notify,'ensure_engine',side_effect=failure), \
+                 patch.object(stream.notify,'engine_ready',return_value=False), \
+                 patch.object(stream.threading,'Thread'), patch.object(stream.signal,'signal'), \
+                 patch.object(stream,'observe') as observe, \
+                 patch.object(sys,'argv',['stream','--socket','/unused','--thread','thread','--ready','/unused-ready']):
+                stream.main()
+                observe.assert_called_once()
+                publisher=observe.call_args.kwargs['submit']
+                self.assertFalse(publisher.start_engine)
+                self.assertTrue(observe.call_args.kwargs['stop'].is_set())
+
+    def test_pre_ready_jobs_preserve_order_and_idempotency(self):
+        publisher=stream.Publisher(self.root/'runtime',start_engine=False)
+        self.a.submit=publisher
+        with patch.object(stream.notify,'engine_ready',return_value=False), patch.object(stream.notify,'ensure_engine') as spawn:
+            self.delta('첫 번째 문장이야. 두 번째 문장이야. 세 번째 문장이야.')
+            self.complete('첫 번째 문장이야. 두 번째 문장이야. 세 번째 문장이야.')
+            self.a.recover()
+            spawn.assert_not_called()
+        jobs=[json.loads(p.read_text()) for p in sorted(publisher.jobs.iterdir()) if not p.name.startswith('.')]
+        self.assertEqual([j['text'] for j in jobs],['첫 번째 문장이야.','두 번째 문장이야.','세 번째 문장이야.'])
+        with patch.object(stream.notify,'run_active',return_value=False):
+            self.delta(' 종료 후 문장이야.')
+        self.assertEqual(len(list(publisher.jobs.iterdir())),3)
+
+    def test_model_readiness_failure_is_logged_without_stopping_observer(self):
+        import threading
+        stop=threading.Event()
+        with patch.object(stream.notify,'engine_ready',return_value=False), patch.object(stream.notify,'run_active',return_value=True), \
+             patch.object(stream.time,'monotonic',side_effect=[0,61]), patch.object(stream.notify,'log_status') as log:
+            stream.monitor_engine(stop)
+        self.assertFalse(stop.is_set())
+        self.assertIn('TTS_READY_FAILED',log.call_args.args[0])
+
+    def test_model_ready_monitor_emits_ready_without_requeue(self):
+        import threading
+        stop=threading.Event()
+        with patch.object(stream.notify,'engine_ready',return_value=True), patch.object(stream.notify,'run_active',return_value=True), \
+             patch.object(stream.notify,'log_status') as log:
+            stream.monitor_engine(stop)
+        self.assertIn('TTS_READY monotonic_ns=',log.call_args.args[0])
+        self.assertFalse(stop.is_set())
+
     def setUp(self):
         environment = patch.dict(os.environ)
         environment.start(); self.addCleanup(environment.stop)

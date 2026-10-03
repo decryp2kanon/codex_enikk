@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import socket
 import signal
+import subprocess
 import threading
 import tempfile
 import time
@@ -181,6 +182,9 @@ class Accumulator:
     def snapshot(self, thread, initial=False, reconnecting=False):
         if initial:
             self.baseline.update(turn['id'] for turn in thread.get('turns', []))
+            # The durable .baseline turn IDs already exclude this history from
+            # both events and reconnects. Do not fsync a redundant file per item.
+            return
         # Active items may be absent from thread/resume until item completion.
         # Deltas have no offsets: appending across a disconnected interval would
         # silently splice unrelated words. Reconcile that turn from full items.
@@ -298,7 +302,10 @@ def connect(endpoint):
     sock.settimeout(10)
     try:
         sock.connect(endpoint)
-        return websocket.create_connection('ws://localhost/', socket=sock, timeout=10)
+        # recv() still performs strict bytes.decode('utf-8'). Avoid the library's
+        # duplicate Python-level validation pass over large Korean histories.
+        return websocket.create_connection('ws://localhost/', socket=sock, timeout=10,
+                                           skip_utf8_validation=True)
     except Exception:
         sock.close()
         raise
@@ -355,7 +362,8 @@ def observe(endpoint, thread_id, directory, ready=None, submit=None, stop=None):
             initial = False
             if ready:
                 atomic_json(Path(ready), dict(thread=thread_id, ready=True,
-                            run_id=os.environ.get('CODEX_ENIKK_TTS_RUN_ID'), state=str(notify.STATE)))
+                            run_id=os.environ.get('CODEX_ENIKK_TTS_RUN_ID'), state=str(notify.STATE),
+                            tts_ready=notify.engine_ready()))
                 notify.log_status(f"stream_ready thread={thread_id} run_id={os.environ.get('CODEX_ENIKK_TTS_RUN_ID')}")
             import websocket
             ws.settimeout(.5)
@@ -394,6 +402,22 @@ def observe(endpoint, thread_id, directory, ready=None, submit=None, stop=None):
             if ws is not None: ws.close()
 
 
+def monitor_engine(stop):
+    """Observe model warmup without blocking the subscription or native TUI."""
+    deadline = time.monotonic() + 60
+    while not stop.is_set():
+        if not notify.run_active():
+            stop.set()
+            return
+        if notify.engine_ready():
+            notify.log_status(f"TTS_READY monotonic_ns={time.monotonic_ns()}")
+            return
+        if time.monotonic() >= deadline:
+            notify.log_status("TTS_READY_FAILED reason=readiness_timeout pending=current_run_preserved")
+            return
+        stop.wait(.05)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--socket', required=True)
@@ -404,13 +428,6 @@ def main():
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     with (directory / '.lock').open('a+b') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        # Load once while the native TUI starts, not after the first sentence.
-        notify.ensure_engine()
-        deadline = time.monotonic() + 25
-        while not notify.engine_ready():
-            if not notify.run_active() or time.monotonic() >= deadline:
-                raise RuntimeError('Chatterbox worker readiness timeout')
-            time.sleep(.05)
         stop = threading.Event()
         def monitor_owner():
             while not stop.wait(.1):
@@ -419,7 +436,18 @@ def main():
         threading.Thread(target=monitor_owner, daemon=True).start()
         signal.signal(signal.SIGTERM, lambda *_: stop.set())
         signal.signal(signal.SIGINT, lambda *_: stop.set())
-        observe(args.socket, args.thread, directory, args.ready, stop=stop)
+        # Queue publication never depends on model readiness. The existing run
+        # namespace/owner cancellation prevents these jobs crossing a restart.
+        try:
+            notify.ensure_engine()
+        except (OSError, subprocess.SubprocessError) as exc:
+            notify.log_status(f"TTS_READY_FAILED reason=spawn_{type(exc).__name__} pending=current_run_preserved")
+        threading.Thread(target=monitor_engine, args=(stop,), daemon=True).start()
+        try:
+            observe(args.socket, args.thread, directory, args.ready,
+                    submit=Publisher(start_engine=False), stop=stop)
+        finally:
+            stop.set()
 
 
 if __name__ == '__main__':

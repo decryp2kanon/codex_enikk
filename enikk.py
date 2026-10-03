@@ -188,7 +188,9 @@ def backup():
             entries.extend(('codex/' + name, stage / name) for name in timings)
             manifest['components'] = sorted({Path(name).parts[1] for name, _ in entries})
             sizes = {}
-            with os.fdopen(fd, 'wb') as raw, tarfile.open(fileobj=raw, mode='w:gz') as archive:
+            # Compression level changes size/CPU only; snapshots, validation and
+            # atomic publication retain exactly the same backup semantics.
+            with os.fdopen(fd, 'wb') as raw, tarfile.open(fileobj=raw, mode='w:gz', compresslevel=1) as archive:
                 fd = None
                 for name, path in entries:
                     data = path.read_bytes()
