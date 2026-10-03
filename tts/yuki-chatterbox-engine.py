@@ -442,7 +442,10 @@ def play_audio(job, path):
     with notify.epoch_lock(STATE):
         if not notify.epoch_valid(job.item, STATE):
             return 'stale'
-        child = subprocess.Popen(['/usr/bin/aplay', '-q', path],
+        audio_env = os.environ.copy()
+        audio_env.setdefault('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
+        audio_env.setdefault('PULSE_SERVER', f'unix:/run/user/{os.getuid()}/pulse/native')
+        child = subprocess.Popen(['/usr/bin/paplay', path], env=audio_env,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         while child.poll() is None:

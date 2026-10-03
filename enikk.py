@@ -790,7 +790,7 @@ def conversation(session_id, instance_fd, args=()):
                                                 Path.home() / 'Apps/chatterbox-yuki')) / '.venv/bin/python'
         tts_python = sys.executable
         tts_ready = (os.environ.get('CODEX_ENIKK_TTS', '1') != '0' and tts_script.is_file()
-                     and chatterbox_python.is_file() and shutil.which('aplay'))
+                     and chatterbox_python.is_file() and shutil.which('paplay'))
         stream_script = install_root / 'tts' / 'yuki-codex-stream.py'
         from contextlib import nullcontext
         context = streaming_tts(session_id, chatterbox_python, stream_script) if tts_ready else nullcontext(None)

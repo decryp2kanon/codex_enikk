@@ -14,11 +14,11 @@ source_reference="${CODEX_ENIKK_CHATTERBOX_REFERENCE_SOURCE:-}"
 bundled_reference="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/assets/yuki_super-clean.wav"
 if [[ ${EUID:-$(id -u)} == 0 && -x /usr/bin/apt-get ]]; then
     apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv alsa-utils libsndfile1
+    DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv pulseaudio-utils libsndfile1
 fi
 command -v python3 >/dev/null
 python3 -c 'import sys; assert sys.version_info >= (3, 10), "Python 3.10+ required"'
-command -v aplay >/dev/null
+command -v paplay >/dev/null
 run_user() {
     if [[ ${EUID:-$(id -u)} == 0 && "$target_user" != root ]]; then
         sudo -u "$target_user" -H -- "$@"

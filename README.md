@@ -258,7 +258,7 @@ codex_enikk
 
 ```bash
 $HOME/Apps/chatterbox-yuki/.venv/bin/python -c 'import chatterbox, torch; print(torch.cuda.is_available())'
-command -v aplay
+command -v paplay
 tail -n 50 "$HOME/.local/state/codex_enikk/tts/notify.log"
 ```
 

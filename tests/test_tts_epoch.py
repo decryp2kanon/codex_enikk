@@ -136,3 +136,41 @@ class EpochTests(unittest.TestCase):
         result=[];thread=threading.Thread(target=lambda:result.append(self.scope['real_play_audio'](types.SimpleNamespace(item=self.job('A')),'unused')))
         thread.start();self.assertTrue(entered.wait(1));start=time.monotonic();self.advance('B',2);thread.join(1)
         self.assertFalse(thread.is_alive());self.assertLess(time.monotonic()-start,.5);self.assertEqual(result,['stale']);self.assertIsNotNone(children[0].poll())
+
+    def test_pulse_playback_defaults_and_success(self):
+        self.advance('A',1)
+        child=Mock(returncode=0, args=['/usr/bin/paplay','test.wav']);child.poll.return_value=0
+        spawn=Mock(return_value=child)
+        self.scope['subprocess']=types.SimpleNamespace(Popen=spawn,DEVNULL=subprocess.DEVNULL,CalledProcessError=subprocess.CalledProcessError)
+        with patch.dict(os.environ,{},clear=True):
+            self.assertEqual(self.scope['real_play_audio'](types.SimpleNamespace(item=self.job('A')),'test.wav'),'played')
+        args,kwargs=spawn.call_args
+        self.assertEqual(args[0],['/usr/bin/paplay','test.wav'])
+        self.assertEqual(kwargs['env']['XDG_RUNTIME_DIR'],f'/run/user/{os.getuid()}')
+        self.assertEqual(kwargs['env']['PULSE_SERVER'],f'unix:/run/user/{os.getuid()}/pulse/native')
+
+    def test_pulse_playback_preserves_explicit_environment(self):
+        self.advance('A',1)
+        child=Mock(returncode=0);child.poll.return_value=0
+        spawn=Mock(return_value=child)
+        self.scope['subprocess']=types.SimpleNamespace(Popen=spawn,DEVNULL=subprocess.DEVNULL)
+        with patch.dict(os.environ,{'XDG_RUNTIME_DIR':'/custom/runtime','PULSE_SERVER':'unix:/custom/pulse'}):
+            self.scope['real_play_audio'](types.SimpleNamespace(item=self.job('A')),'test.wav')
+        self.assertEqual(spawn.call_args.kwargs['env']['XDG_RUNTIME_DIR'],'/custom/runtime')
+        self.assertEqual(spawn.call_args.kwargs['env']['PULSE_SERVER'],'unix:/custom/pulse')
+
+    def test_pulse_nonzero_failure_does_not_kill_playback_loop(self):
+        self.advance('A',1)
+        children=[Mock(returncode=1,args=['/usr/bin/paplay','bad.wav']),Mock(returncode=0,args=['/usr/bin/paplay','good.wav'])]
+        for child in children:child.poll.return_value=child.returncode
+        spawn=Mock(side_effect=children)
+        self.scope['subprocess']=types.SimpleNamespace(Popen=spawn,DEVNULL=subprocess.DEVNULL,CalledProcessError=subprocess.CalledProcessError)
+        self.scope['play_audio']=self.scope['real_play_audio']
+        job=self.scope['DeliveryJob'](self.root/'job',self.job('A'),['첫 문장','다음 문장'])
+        q=queue.Queue()
+        for i in range(2):
+            wav=self.root/f'{i}.wav';wav.touch()
+            q.put((job,i,str(wav),time.monotonic_ns(),time.monotonic(),1))
+        q.put(None);self.scope['playback'](q)
+        self.assertEqual(spawn.call_count,2)
+        self.assertEqual(job.terminal,{'0':'FAILED_EXPLICITLY','1':'PLAYED'})
