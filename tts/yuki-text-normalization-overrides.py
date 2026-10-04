@@ -161,4 +161,3 @@ def normalize_paths(text):
 
     normalized = pattern.sub(replace, text)
     return normalized, records
-
