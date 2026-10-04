@@ -201,19 +201,53 @@ Readiness, writes and replies have bounded deadlines; failures are explicit,
 with no fallback to the old pronunciation tables. Codex remains usable if TTS
 initialization fails.
 
-Only the explicit names Yuki, Enikk and Sugarchain have project exceptions.
-General English is left to upstream, which often retains the original spelling.
-No additional Korean phonology/G2P is applied. Filesystem descriptions remain a
-separate path-only feature; the resulting full reading text is normalized once,
-then safely split, and the guard analyzes the same text sent to generation.
-Displayed source text and path replacement accounting are retained.
+The project-name exceptions remain Yuki, Enikk and Sugarchain. General English, except the narrow USER-confirmed listening errors below,
+is left to upstream, which often retains the original spelling; this does not
+establish correct acoustic pronunciation of brands or acronyms. No additional
+Korean phonology/G2P or legacy pronunciation table is applied. Filesystem descriptions
+remain a separate path-only feature. Normalization precedes safe splitting, and
+the guard analyzes the same text sent to generation. Displayed source text and
+path replacement accounting are retained.
 
-Known upstream differences: `1,024` can become `일 , 영 이십사`, `일반 한국어`
-can become `일요일 반 한국어`, `44.1kHz` can become `사사.일kHz`, and `10/2`
-is treated as a fraction. Some operators and units remain untranslated; URLs and
-email addresses may be partially normalized. These are upstream outputs, not
-custom arithmetic interpretation. Version `3.10` retains its final zero.
-Do not interpret these outputs as validated mathematical or technical semantics.
+The candidate adds only protections for reproduced NeMo 1.2.0 errors:
+
+- A standalone `일반` token is protected from the erroneous `일요일 반` reading.
+  Attached forms such as `일반적인` and legitimate `일요일 반` remain untouched.
+- Valid thousands groups such as `1,024` lose their grouping commas before TN.
+  Prose commas, malformed groups, leading-zero identifiers and decimal fractions
+  are not treated as thousands groups.
+- Attached numeric `GB`, `MB`, `TB`, `kHz`, `kbps` and `km/h` receive case-sensitive unit
+  labels. Their numbers still go through NeMo once. `Gb`, mixed identifiers and
+  ranges are not silently interpreted as byte quantities.
+- Digit-bearing relative filenames and `.mp3` are preserved as identifiers,
+  instead of partly normalizing their embedded numbers. Preservation does not
+  guarantee a particular spoken filename pronunciation.
+
+Following USER listening feedback, exact case-sensitive prose tokens `Python`,
+`CPU`, `TTS`, `API`, `GPU`, and `VRAM` have explicit readings: 파이썬, 씨피유,
+티티에스, 에이피아이, 지피유, and 브이램. `km/h` is read as 킬로미터 퍼 아워.
+These are not general letter mappings: longer words, identifiers, filenames,
+URLs and emails are excluded from these token substitutions.
+The known filename `report_v31.1.md` is described as
+리포트 버전 31 점 1 마크다운 파일 only in the path-description layer, retaining
+its original identifier/span accounting. Only this known filename uses explicit
+spacing between version components; ordinary numeric versions are unchanged.
+Attached or spaced particles agree with the final 파일 noun, while absolute
+path descriptions retain their existing 경로 particle behavior.
+Other relative filenames and ordinary `report` prose receive no new description.
+All other previously accepted readings and the upstream default remain in place.
+
+Protected spans use input-disjoint markers that must survive exactly once;
+missing or duplicated markers fail explicitly. Restoring these exact spans is
+not a general Korean post-replacement pass. Working upstream date, time, percent,
+version and ordinary decimal rules receive no custom overrides.
+
+Remaining upstream limitations include untranslated English/acronyms, spaced
+unit forms, partially normalized URLs/email and operators, `10/2` being treated
+as a fraction, and an explicit unary plus disappearing from `+5`. Version `3.10`
+retains its final zero. These limitations are reported rather than patched with
+an unverified general dictionary. The CPU corpus verifies text transformations;
+acoustic pronunciation and live candidate playback still require listening.
 
 Current app processes are not hot-patched. After a managed update, exit normally
 and run `codex_enikk resume <thread-id>` to load the new worker. Retain the previous

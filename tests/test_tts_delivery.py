@@ -51,6 +51,39 @@ class PathTests(unittest.TestCase):
     def normalize(self, text):
         return self.scope['normalize_paths'](text)[0]
 
+    def test_only_known_report_filename_has_explicit_description(self):
+        source = 'report_v31.1.md 파일도 확인합니다.'
+        result, records = self.scope['normalize_paths'](source)
+        self.assertEqual(result, '리포트 버전 31 점 1 마크다운 파일도 확인합니다.')
+        self.assertEqual(records[0]['original'], 'report_v31.1.md')
+        self.assertEqual(source[slice(*records[0]['span'])], records[0]['replaced_text'])
+        self.assertEqual(self.normalize('/tmp/report_v31.1.md'),
+                         '리포트 버전 31 점 1 마크다운 파일 경로')
+        for text in ['report is ready', 'report_v31.2.md', 'other-report_v31.1.md',
+                     'https://example.com/?file=report_v31.1.md', 'x@report_v31.1.md']:
+            self.assertEqual(self.scope['normalize_paths'](text), (text, []))
+
+    def test_known_relative_file_preserves_consonant_noun_particles(self):
+        for particle in ['을', '은', '이', '으로', '도']:
+            source = 'report_v31.1.md 파일' + particle + ' 확인합니다.'
+            self.assertEqual(self.normalize(source),
+                             '리포트 버전 31 점 1 마크다운 파일' + particle + ' 확인합니다.')
+        self.assertEqual(self.normalize('/tmp/report_v31.1.md 파일을 확인합니다.'),
+                         '리포트 버전 31 점 1 마크다운 파일 경로를 확인합니다.')
+
+    def test_known_filename_attached_particles_only(self):
+        for particle, wanted in {'를':'을', '는':'은', '가':'이', '와':'과', '로':'로', '에서':'에서'}.items():
+            source = 'report_v31.1.md' + particle + ' 확인합니다.'
+            result, records = self.scope['normalize_paths'](source)
+            self.assertEqual(result, '리포트 버전 31 점 1 마크다운 파일' + wanted + ' 확인합니다.')
+            self.assertEqual(source[slice(*records[0]['span'])], records[0]['replaced_text'])
+        self.assertEqual(self.normalize('report_v31.1.md가이드 확인합니다.'),
+                         '리포트 버전 31 점 1 마크다운 파일가이드 확인합니다.')
+
+    def test_unrelated_path_particle_behavior_is_unchanged(self):
+        self.assertEqual(self.normalize('/tmp/test.md 파일도 확인합니다.'),
+                         '테스트 마크다운 파일 경로 파일도 확인합니다.')
+
     def test_required_paths(self):
         for path, expected in {
             '/home/ak/git/codex_enikk/tts/yuki-chatterbox-engine.py': '유키 채터박스 엔진 파이썬 파일 경로',

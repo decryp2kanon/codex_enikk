@@ -71,7 +71,7 @@ class InstalledGrammarTests(unittest.TestCase):
         cls.client.close()
 
     def test_actual_public_rules(self):
-        for text, expected in {'-5': '마이너스 오', 'Python 3.10': 'Python 삼점일영',
+        for text, expected in {'-5': '마이너스 오', 'Python 3.10': '파이썬 삼점일영',
                                '2026년 10월 4일': '이천이십육년 시월 사일'}.items():
             self.assertEqual(self.client.normalize(text), expected)
 
@@ -122,3 +122,121 @@ class WorkerNormalizationFailureTests(unittest.TestCase):
                 model.generate.assert_not_called()
             finally:
                 ready.put(None)
+
+class ExceptionBoundaryTests(unittest.TestCase):
+    def test_thousands_groups_only(self):
+        pattern = tn.GROUPED_INTEGER
+        convert = lambda t: pattern.sub(lambda m:m.group().replace(',', ''), t)
+        self.assertEqual(convert('1,024개와 45,000원, 1,234,567.89'), '1024개와 45000원, 1234567.89')
+        self.assertEqual(convert('1,024, 다음 숫자는 2,048이다.'), '1024, 다음 숫자는 2048이다.')
+        for text in ['1,24', '1,024,56', '1234,567', 'ABC1,024', '안녕, 반가워', '3.1,024', '0,024', '01,024']:
+            self.assertEqual(convert(text), text)
+
+    def test_no_general_korean_rewriting(self):
+        class Identity:
+            def normalize(self, text):return text
+        text = '일반 일반적인 일반은 일요일 반 열은 월별 월요일 정상'
+        self.assertEqual(tn.normalize_with_exceptions(text, Identity()), text)
+
+    def test_only_digit_bearing_file_identifiers_are_protected(self):
+        self.assertIsNone(tn.KNOWN_PROTECTED.search('test.wav'))
+        self.assertIsNotNone(tn.KNOWN_PROTECTED.fullmatch('report_v31.1.md'))
+        self.assertIsNotNone(tn.KNOWN_PROTECTED.fullmatch('test.mp3'))
+
+    def test_heard_terms_do_not_change_words_identifiers_or_addresses(self):
+        for text in ['Pythonic', 'MyPython', 'CPU2', 'CPU_core', 'xGPU', 'TTS_ENGINE',
+                     'APIs', 'VRAM_cache', 'Python.py', 'report', 'API-user',
+                     'https://example.com/?name=CPU', 'x+API@example.com']:
+            self.assertEqual(tn.heard_error_readings(text), text)
+        self.assertEqual(tn.heard_error_readings('Python. CPU의 GPU와 VRAM은 TTS API를'),
+                         '파이썬. 씨피유의 지피유와 브이램은 티티에스 에이피아이를')
+
+    def test_markers_cannot_collide_with_input(self):
+        class Identity:
+            def normalize(self, text):return text
+        text = '\ue000 일반 \ue001 .mp3'
+        self.assertEqual(tn.normalize_with_exceptions(text, Identity()), text)
+
+    def test_lost_or_duplicate_protection_fails_closed(self):
+        class Dropping:
+            def normalize(self, text):return ''
+        class Duplicating:
+            def normalize(self, text):return text + text
+        for bad in [Dropping(), Duplicating()]:
+            with self.assertRaisesRegex(RuntimeError, 'lost or duplicated'):
+                tn.normalize_with_exceptions('일반', bad)
+
+    def test_byte_units_are_case_sensitive_and_identifiers_not_units(self):
+        for text in ['8Gb', '8gb', 'test8GB', 'test_8GB', '8GBPS', 'test-8GB', '3-8GB']:
+            self.assertIsNone(tn.NUMBER_UNIT.search(text))
+        self.assertEqual(tn.NUMBER_UNIT.fullmatch('-8GB').group('number'), '-8')
+
+
+@unittest.skipUnless((Path.home() / 'Apps/enikk-nemo-tn/.venv/bin/python').is_file(), 'isolated NeMo unavailable')
+class KnownErrorIntegrationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.client = tn.Client()
+        cls.client.initialize()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.client.close()
+
+    def test_general_korean_exactly_preserved(self):
+        for text in ['일반 한국어 문장입니다. 일반적인 대화를 확인합니다.',
+                     '일반은 일반적인 개념이며 일요일과 월요일을 확인한다.',
+                     '열은 정상이고 일반적으로 문제없다.']:
+            self.assertEqual(self.client.normalize(text), text)
+
+    def test_comma_grouping(self):
+        result = self.client.normalize('파일은 1,024개이고 가격은 45,000원입니다.')
+        self.assertIn('천이십사', result)
+        self.assertIn('사만오천', result)
+        self.assertNotIn(',', result)
+
+    def test_known_measure_errors_and_negative_values(self):
+        for text, expected in {'8GB': '팔 기가바이트', '512MB': '오백십이 메가바이트',
+                               '2TB': '이 테라바이트', '44.1kHz':'사십사점일 킬로헤르츠',
+                               '192kbps':'백구십이 킬로비트 퍼 초', '-5GB':'마이너스 오 기가바이트'}.items():
+            self.assertEqual(self.client.normalize(text), expected)
+
+    def test_only_user_confirmed_english_errors(self):
+        self.assertEqual(self.client.normalize('GPU VRAM CPU TTS API'),
+                         '지피유 브이램 씨피유 티티에스 에이피아이')
+        text = 'Linux Ubuntu GitHub Codex OpenAI'
+        self.assertEqual(self.client.normalize(text), text)
+
+    def test_python_and_speed_unit_readings(self):
+        self.assertEqual(self.client.normalize('Python 3.10'), '파이썬 삼점일영')
+        self.assertEqual(self.client.normalize('120km/h'), '백이십 킬로미터 퍼 아워')
+        self.assertEqual(self.client.normalize('km/h'), '킬로미터 퍼 아워')
+
+    def test_version_fraction_digits_and_extensions(self):
+        self.assertEqual(self.client.normalize('Python 3.10'), '파이썬 삼점일영')
+        self.assertEqual(self.client.normalize('test.wav와 .mp3 파일을 확인한다.'),
+                         'test.wav와 .mp3 파일을 확인한다.')
+
+    def test_known_filename_uses_path_layer_before_public_tn(self):
+        from test_tts_delivery import definitions
+        source = 'report_v31.1.md 파일도 확인합니다.'
+        spoken, records = definitions()['normalize_paths'](source)
+        self.assertEqual(self.client.normalize(spoken),
+                         '리포트 버전 삼십일 점 일 마크다운 파일도 확인합니다.')
+        self.assertEqual(records[0]['original'], 'report_v31.1.md')
+        self.assertEqual(self.client.normalize('report_v31.1.md'), 'report_v31.1.md')
+
+    def test_public_working_rules_unchanged(self):
+        for text, expected in {'31.1':'삼십일점일', '2.8초':'이점팔 초',
+                               '1.25배':'일점이오 배', '99.9%':'구십구점구 퍼센트',
+                               '2026년 10월 4일':'이천이십육년 시월 사일',
+                               '23:30':'이십삼시 삼십분', '12시 12분':'열두시 십이분'}.items():
+            self.assertEqual(self.client.normalize(text), expected)
+
+    def test_long_input_has_no_sentinel_or_content_loss(self):
+        text = ('일반 한국어 문장입니다. 파일은 1,024개이고 오디오 설정은 44.1kHz입니다. ' * 24)
+        result = self.client.normalize(text)
+        self.assertEqual(result.count('일반 한국어 문장입니다.'), 24)
+        self.assertEqual(result.count('천이십사'), 24)
+        self.assertEqual(result.count('킬로헤르츠'), 24)
+        self.assertFalse(any('\ue000' <= c <= '\uf8ff' for c in result))

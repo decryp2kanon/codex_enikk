@@ -70,8 +70,10 @@ def normalize_paths(text):
     # Delimited paths may contain Korean filenames. Attached Korean particles
     # after a known extension are prose, not part of that filename.
     pattern = re.compile(
-        r"(?<![\w/:.])(?P<path>`?(?:/(?:home|tmp|usr|etc|var|opt)/|~/|\.\.?/)[^\s`\"'<>()[\]{}]+`?)"
-        r"(?:\s+(?:파일|경로)(?P<particle>에서|으로|을|를|은|는|이|가|에|로)?(?=\s|[.!?,]|$))?")
+        r"(?<![\w/:.])(?P<path>`?(?:(?:/(?:home|tmp|usr|etc|var|opt)/|~/|\.\.?/)[^\s`\"'<>()[\]{}]+"
+        r"|(?P<known_report>(?<![@-])report_v31\.1\.md(?![A-Za-z0-9_-]|\.[A-Za-z0-9_])))`?)"
+        r"(?(known_report)(?:(?P<filename_particle>으로|에서|을|를|은|는|이|가|에|로|와|과|도)(?=\s|[.!?,]|$))?|)"
+        r"(?:\s+(?:파일|경로)(?P<particle>에서|으로|을|를|은|는|이|가|에|로|(?(known_report)도|(?!)))?(?=\s|[.!?,]|$))?")
     records = []
 
     def replace(match):
@@ -95,9 +97,22 @@ def normalize_paths(text):
                    or any(len(token) > 20 for token in re.split(r'[-_.]', stem)))
         spoken = '' if machine else ' '.join(names.get(token.lower(), token)
                                              for token in re.split(r'[-_.]+', stem) if token)
-        result = ' '.join(filter(None, (spoken, description, '경로')))
-        tail += match.group('particle') or ''
-        tail = re.sub(r'^(을|이|은|으로)', lambda m: {'을': '를', '이': '가', '은': '는', '으로': '로'}[m[0]], tail)
+        if basename == 'report_v31.1.md':
+            if '/' not in path:
+                surrounding = (re.search(r'\S*$', text[:match.start()]).group()
+                               + match.group() + re.match(r'\S*', text[match.end():]).group())
+                if '://' in surrounding or '@' in surrounding:
+                    return match.group()
+            # USER-confirmed bad filename reading; preserve original/span accounting.
+            # Keep version digits for NeMo, and do not rewrite ordinary 'report'.
+            spoken = '리포트 버전 31 점 1'
+        kind = '경로' if '/' in path else ''
+        result = ' '.join(filter(None, (spoken, description, kind)))
+        tail += match.group('filename_particle') or match.group('particle') or ''
+        if not kind:
+            tail = re.sub(r'^(를|는|가|와)', lambda m: {'를': '을', '는': '은', '가': '이', '와': '과'}[m[0]], tail)
+        if kind:
+            tail = re.sub(r'^(을|이|은|으로)', lambda m: {'을': '를', '이': '가', '은': '는', '으로': '로'}[m[0]], tail)
         records.append({'original': raw, 'description': result, 'span': match.span(),
                         'replaced_text': match.group(0), 'spoken': result + tail})
         return result + tail
