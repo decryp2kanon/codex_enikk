@@ -460,18 +460,41 @@ class DeliveryJob:
 
 
 def play_audio(job, path):
-    # Playback-only speed-up: preserve pitch while shortening spoken output by 25%.
-    # Generation is unchanged; ffmpeg atempo runs immediately before paplay.
+    # Playback-only 1.25x tempo, preserving pitch: duration becomes 80%.
+    # Conversion and playback are both cancellable, owned child processes.
     speed_path = None
-    try:
-        with tempfile.NamedTemporaryFile(prefix='yuki-1.25x-', suffix='.wav', delete=False) as tmp:
-            speed_path = tmp.name
-        subprocess.run([
-            '/usr/bin/ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
-            '-i', path, '-filter:a', 'atempo=1.25', speed_path
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    child = None
 
-        # Serialize the last validity check and spawn with the user barrier commit.
+    def wait_child(phase):
+        while child.poll() is None:
+            if not notify.epoch_valid(job.item, STATE):
+                child.terminate()
+                try: child.wait(timeout=.2)
+                except subprocess.TimeoutExpired:
+                    child.kill(); child.wait()
+                log(f"Chatterbox {phase}_stopped job={job.item['id']} epoch={job.item.get('epoch')} monotonic_ns={time.monotonic_ns()}")
+                return 'stale'
+            time.sleep(.02)
+        if not notify.epoch_valid(job.item, STATE):
+            return 'stale'
+        if child.returncode:
+            raise subprocess.CalledProcessError(child.returncode, child.args)
+        return 'done'
+
+    try:
+        # Reject stale jobs before creating a file or launching ffmpeg.
+        with notify.epoch_lock(STATE):
+            if not notify.epoch_valid(job.item, STATE):
+                return 'stale'
+            with tempfile.NamedTemporaryFile(prefix='yuki-1.25x-', suffix='.wav', delete=False) as tmp:
+                speed_path = tmp.name
+            child = subprocess.Popen([
+                '/usr/bin/ffmpeg', '-nostdin', '-y', '-hide_banner', '-loglevel', 'error',
+                '-i', path, '-filter:a', 'atempo=1.25', speed_path
+            ], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if wait_child('tempo_conversion') == 'stale':
+            return 'stale'
+
         with notify.epoch_lock(STATE):
             if not notify.epoch_valid(job.item, STATE):
                 return 'stale'
@@ -480,32 +503,15 @@ def play_audio(job, path):
             audio_env.setdefault('PULSE_SERVER', f'unix:/run/user/{os.getuid()}/pulse/native')
             child = subprocess.Popen(['/usr/bin/paplay', speed_path], env=audio_env,
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        while child.poll() is None:
-            if not notify.epoch_valid(job.item, STATE):
-                child.terminate()  # Only this worker's exact playback child.
-                try:
-                    child.wait(timeout=.2)
-                except subprocess.TimeoutExpired:
-                    child.kill(); child.wait()
-                log(f"Chatterbox playback_stopped job={job.item['id']} epoch={job.item.get('epoch')} monotonic_ns={time.monotonic_ns()}")
-                return 'stale'
-            time.sleep(.02)
-        if not notify.epoch_valid(job.item, STATE):
-            return 'stale'
-        if child.returncode:
-            raise subprocess.CalledProcessError(child.returncode, child.args)
-        return 'played'
+        return 'stale' if wait_child('playback') == 'stale' else 'played'
     finally:
-        if 'child' in locals() and child.poll() is None:
+        if child is not None and child.poll() is None:
             child.terminate()
             try: child.wait(timeout=.2)
             except subprocess.TimeoutExpired:
                 child.kill(); child.wait()
         if speed_path:
-            try:
-                os.unlink(speed_path)
-            except FileNotFoundError:
-                pass
+            Path(speed_path).unlink(missing_ok=True)
 
 
 def playback(ready):
