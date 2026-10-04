@@ -62,3 +62,10 @@ Do not retry UNKNOWN_EFFECT automatically. No public network listener is used.
 This candidate must pass same-thread native TUI, approval/tool, harmless trigger,
 duplicate, continuity and Yuki checks before its PR may be updated. Unit fixtures
 alone do not establish those live results.
+
+## Visible command
+
+The submitted USER message contains a Korean delegation notice, snapshot path,
+and the complete validated UTF-8 command body without truncation. The displayed
+body and immutable snapshot use the same captured bytes. Mutable inbox changes
+do not amend an accepted task. Existing turns are not resent after an update.

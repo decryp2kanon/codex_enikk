@@ -47,6 +47,19 @@ class TriggerProtocolTests(unittest.TestCase):
         self.assertEqual(len(self.service.observer.calls), 1)
         self.assertEqual(self.service.observer.calls[0][1]['threadId'], 'thread')
 
+    def test_korean_full_body_visible_and_matches_snapshot(self):
+        original = '긴 문장을 읽어 줘.  공백도 보존해.\n' * 1000 + '\nEOF\n'
+        self.inbox.write_text(original)
+        result = self.request()
+        self.assertEqual(result['status'], 'ACCEPTED')
+        message = self.service.observer.calls[0][1]['input'][0]['text']
+        self.assertTrue(message.startswith('[USER · 도로시 경유]'))
+        displayed = message.split('===== 명령서 원문 =====\n', 1)[1]
+        task = self.service.tasks / result['task_id']
+        self.assertEqual(displayed.encode('utf-8'), (task / 'command.md').read_bytes())
+        self.assertEqual(displayed, original)
+        self.assertIn('merge에는 USER 승인을 받으세요', message)
+
     def test_invalid_eof(self):
         self.inbox.write_text('do something')
         self.assertEqual(self.request()['status'], 'INVALID_EOF')
