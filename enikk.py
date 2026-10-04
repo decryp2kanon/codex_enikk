@@ -764,6 +764,40 @@ def streaming_tts(session_id, python, script):
                             process.wait()
 
 
+@contextmanager
+def submission_proxy(endpoint, session_id, python):
+    """Wrapper owns both submission paths; never spawn another Codex/TTS worker."""
+    if not endpoint or os.environ.get('CODEX_ENIKK_TRIGGER', '0') != '1':
+        yield endpoint
+        return
+    version = subprocess.run(['codex', '--version'], capture_output=True, text=True, timeout=5)
+    if version.returncode or version.stdout.strip() != 'codex-cli 0.160.0':
+        raise RuntimeError('Submission arbiter requires verified Codex 0.160.0')
+    script = Path(__file__).resolve().parent / 'trigger_service.py'
+    root = Path.home() / '.local/state/codex_enikk/trigger'
+    private_dir(root)
+    with tempfile.TemporaryDirectory(prefix='enikk-arbiter-') as directory:
+        proxy, ready = Path(directory) / 'native.sock', Path(directory) / 'ready.json'
+        with (root / 'receiver.log').open('ab') as log:
+            process = subprocess.Popen([str(python), str(script), '--upstream', endpoint.removeprefix('unix://'),
+                '--thread', session_id, '--root', str(root), '--proxy', str(proxy),
+                '--trigger', str(root / 'trigger.sock'), '--ready', str(ready)],
+                stdin=subprocess.DEVNULL, stdout=log, stderr=log, close_fds=True, start_new_session=True)
+            try:
+                deadline = time.monotonic() + 15
+                while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+                    time.sleep(.05)
+                if not ready.exists() or process.poll() is not None:
+                    raise RuntimeError('Submission arbiter failed to initialize; no unsafe direct fallback')
+                yield 'unix://' + str(proxy)
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                    try: process.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        process.kill(); process.wait()
+
+
 def conversation(session_id, instance_fd, args=()):
     """Let the native TUI own the terminal, clipboard, slash commands and rendering."""
     yolo = '--dangerously-bypass-approvals-and-sandbox'
@@ -794,7 +828,7 @@ def conversation(session_id, instance_fd, args=()):
         stream_script = install_root / 'tts' / 'yuki-codex-stream.py'
         from contextlib import nullcontext
         context = streaming_tts(session_id, chatterbox_python, stream_script) if tts_ready else nullcontext(None)
-        with context as endpoint:
+        with context as upstream, submission_proxy(upstream, session_id, chatterbox_python) as endpoint:
             if endpoint:
                 # Remote resume rejects permission flags; the private server owns
                 # the same unrestricted policy as the existing standalone path.

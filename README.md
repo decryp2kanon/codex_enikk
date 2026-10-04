@@ -331,3 +331,20 @@ FAIL 결과에는 위치와 expected/observed가 포함됩니다. 인증·네트
 현재 wrapper는 Codex 0.158.0에 명시적으로 고정되어 있습니다. 다른 candidate가 protocol 검사를 통과해도
 `wrapper version gate`에서 이를 알리고 `INCOMPATIBLE`로 판정합니다. 검사기가 pin을 자동 변경하지 않습니다.
 새 버전 허용은 검증 결과를 검토한 뒤 별도 변경으로 진행합니다. 26초 수준의 TTS warmup 최적화는 이 검사의 범위가 아닙니다.
+
+## Dorothy 자동 명령 전달
+
+자동 전달 receiver와 CLI도 관리 설치 및 업데이트에 포함됩니다.
+정상 종료 후 다음 명령으로 같은 Enikk 대화를 재개하면 활성화됩니다.
+
+```bash
+CODEX_ENIKK_TRIGGER=1 codex_enikk
+```
+
+검증된 Codex 0.160.0과 streaming 경로가 필요합니다. 실행 중인 앱에 파일만
+업데이트해도 receiver가 추가되지는 않습니다. 초기 확인에는
+`enikk-trigger --fixture`를 사용하며 실제 inbox를 실행하지 않습니다.
+이후 `enikk-trigger "$HOME/dorothy-command.md"`로 명령을 전달합니다.
+BUSY 또는 UNKNOWN_EFFECT는 자동 재전송하지 않습니다.
+`CODEX_ENIKK_TRIGGER=0`은 기존 직접 연결 경로를 유지합니다.
+권한·중복 방지·복구 정책은 [docs/dorothy-trigger.md](docs/dorothy-trigger.md)를 참고하세요.

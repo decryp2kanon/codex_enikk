@@ -22,6 +22,13 @@ for file in enikk.py VERSION README.md; do
 done
 [[ -d "$source_dir/tts" ]] || exit 1
 checker="${stage}${prefix}/bin/check-codex-compat"
+trigger="${stage}${prefix}/bin/enikk-trigger"
+if [[ -e "$trigger" || -L "$trigger" ]]; then
+    [[ -L "$trigger" && "$(readlink -- "$trigger")" == ../lib/codex_enikk/enikk-trigger ]] || {
+        echo '기존 enikk-trigger 명령을 덮어쓰지 않습니다.' >&2
+        exit 1
+    }
+fi
 if [[ -e "$checker" || -L "$checker" ]]; then
     [[ -L "$checker" && "$(readlink -- "$checker")" == ../lib/codex_enikk/check-codex-compat ]] || {
         echo '기존 check-codex-compat 명령을 덮어쓰지 않습니다.' >&2
@@ -43,18 +50,21 @@ trap cleanup EXIT
 if [[ -f "$lib/latest.py" ]]; then
     cp -a -- "$lib/latest.py" "$previous/latest.py"
 fi
-for file in persistence.py restore.py check_codex_compat.py check-codex-compat uninstall.sh; do
+for file in persistence.py restore.py check_codex_compat.py check-codex-compat uninstall.sh handoff_command.py submission_arbiter.py trigger_transport.py trigger_service.py trigger_client.py enikk-trigger; do
     if [[ -f "$lib/$file" ]]; then
         cp -a -- "$lib/$file" "$previous/$file"
     fi
 done
-for file in README.md VERSION latest.py persistence.py restore.py enikk.py check_codex_compat.py check-codex-compat uninstall.sh; do
+for file in README.md VERSION latest.py persistence.py restore.py enikk.py check_codex_compat.py check-codex-compat uninstall.sh handoff_command.py submission_arbiter.py trigger_transport.py trigger_service.py trigger_client.py enikk-trigger; do
     temporary="$(mktemp "$lib/.$file.XXXXXXXX")"
     install -m 644 -- "$source_dir/$file" "$temporary"
     mv -f -- "$temporary" "$lib/$file"
     temporary=""
 done
-chmod 755 "$lib/check-codex-compat" "$lib/uninstall.sh"
+chmod 755 "$lib/check-codex-compat" "$lib/uninstall.sh" "$lib/enikk-trigger"
+if [[ ! -L "$trigger" ]]; then
+    ln -s -- ../lib/codex_enikk/enikk-trigger "$trigger"
+fi
 if [[ ! -L "$checker" ]]; then
     ln -s -- ../lib/codex_enikk/check-codex-compat "$checker"
 fi
