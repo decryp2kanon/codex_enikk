@@ -26,6 +26,18 @@ class EpochTests(unittest.TestCase):
         self.scope = definitions(); self.scope.update(STATE=self.root, notify=self.notify)
         self.publisher = stream.Publisher(self.root, start_engine=False)
 
+    def process_api(self, playback_spawn, converter=None):
+        if converter is None:
+            converter = Mock(returncode=0)
+            converter.poll.return_value = 0
+        def spawn(args, **kwargs):
+            if args[0] == '/usr/bin/ffmpeg':
+                return converter
+            return playback_spawn(args, **kwargs)
+        return types.SimpleNamespace(Popen=spawn, DEVNULL=subprocess.DEVNULL,
+                                     TimeoutExpired=subprocess.TimeoutExpired,
+                                     CalledProcessError=subprocess.CalledProcessError)
+
     def advance(self, name, ordinal):
         return self.notify.advance_epoch('thread', name, name, ordinal)
 
@@ -124,7 +136,7 @@ class EpochTests(unittest.TestCase):
     def test_playback_rechecks_before_process_start(self):
         item=self.job('A');job=self.scope['DeliveryJob'](self.root/'job',item,['한 문장'])
         wav=self.root/'test.wav';wav.touch();q=queue.Queue();q.put((job,0,str(wav),time.monotonic_ns(),time.monotonic(),1));q.put(None)
-        self.scope['play_audio']=self.scope['real_play_audio'];process=Mock();self.scope['subprocess']=types.SimpleNamespace(Popen=process,DEVNULL=subprocess.DEVNULL)
+        self.scope['play_audio']=self.scope['real_play_audio'];process=Mock();self.scope['subprocess']=self.process_api(process)
         with patch.object(self.notify,'epoch_valid',side_effect=[True,False]):self.scope['playback'](q)
         process.assert_not_called();self.assertEqual(job.terminal,{'0':'STALE'})
 
@@ -132,7 +144,7 @@ class EpochTests(unittest.TestCase):
         self.advance('A',1);entered=threading.Event();children=[]
         def spawn(*args,**kwargs):
             child=subprocess.Popen(['/bin/sleep','10']);children.append(child);entered.set();return child
-        self.scope['subprocess']=types.SimpleNamespace(Popen=spawn,DEVNULL=subprocess.DEVNULL,TimeoutExpired=subprocess.TimeoutExpired,CalledProcessError=subprocess.CalledProcessError)
+        self.scope['subprocess']=self.process_api(spawn)
         result=[];thread=threading.Thread(target=lambda:result.append(self.scope['real_play_audio'](types.SimpleNamespace(item=self.job('A')),'unused')))
         thread.start();self.assertTrue(entered.wait(1));start=time.monotonic();self.advance('B',2);thread.join(1)
         self.assertFalse(thread.is_alive());self.assertLess(time.monotonic()-start,.5);self.assertEqual(result,['stale']);self.assertIsNotNone(children[0].poll())
@@ -141,11 +153,13 @@ class EpochTests(unittest.TestCase):
         self.advance('A',1)
         child=Mock(returncode=0, args=['/usr/bin/paplay','test.wav']);child.poll.return_value=0
         spawn=Mock(return_value=child)
-        self.scope['subprocess']=types.SimpleNamespace(Popen=spawn,DEVNULL=subprocess.DEVNULL,CalledProcessError=subprocess.CalledProcessError)
+        self.scope['subprocess']=self.process_api(spawn)
         with patch.dict(os.environ,{},clear=True):
             self.assertEqual(self.scope['real_play_audio'](types.SimpleNamespace(item=self.job('A')),'test.wav'),'played')
         args,kwargs=spawn.call_args
-        self.assertEqual(args[0],['/usr/bin/paplay','test.wav'])
+        self.assertEqual(args[0][0], '/usr/bin/paplay')
+        self.assertNotEqual(args[0][1], 'test.wav')
+        self.assertFalse(Path(args[0][1]).exists())
         self.assertEqual(kwargs['env']['XDG_RUNTIME_DIR'],f'/run/user/{os.getuid()}')
         self.assertEqual(kwargs['env']['PULSE_SERVER'],f'unix:/run/user/{os.getuid()}/pulse/native')
 
@@ -153,7 +167,7 @@ class EpochTests(unittest.TestCase):
         self.advance('A',1)
         child=Mock(returncode=0);child.poll.return_value=0
         spawn=Mock(return_value=child)
-        self.scope['subprocess']=types.SimpleNamespace(Popen=spawn,DEVNULL=subprocess.DEVNULL)
+        self.scope['subprocess']=self.process_api(spawn)
         with patch.dict(os.environ,{'XDG_RUNTIME_DIR':'/custom/runtime','PULSE_SERVER':'unix:/custom/pulse'}):
             self.scope['real_play_audio'](types.SimpleNamespace(item=self.job('A')),'test.wav')
         self.assertEqual(spawn.call_args.kwargs['env']['XDG_RUNTIME_DIR'],'/custom/runtime')
@@ -164,7 +178,7 @@ class EpochTests(unittest.TestCase):
         children=[Mock(returncode=1,args=['/usr/bin/paplay','bad.wav']),Mock(returncode=0,args=['/usr/bin/paplay','good.wav'])]
         for child in children:child.poll.return_value=child.returncode
         spawn=Mock(side_effect=children)
-        self.scope['subprocess']=types.SimpleNamespace(Popen=spawn,DEVNULL=subprocess.DEVNULL,CalledProcessError=subprocess.CalledProcessError)
+        self.scope['subprocess']=self.process_api(spawn)
         self.scope['play_audio']=self.scope['real_play_audio']
         job=self.scope['DeliveryJob'](self.root/'job',self.job('A'),['첫 문장','다음 문장'])
         q=queue.Queue()
@@ -174,3 +188,42 @@ class EpochTests(unittest.TestCase):
         q.put(None);self.scope['playback'](q)
         self.assertEqual(spawn.call_count,2)
         self.assertEqual(job.terminal,{'0':'FAILED_EXPLICITLY','1':'PLAYED'})
+
+    def test_tempo_conversion_cancelled_before_playback(self):
+        self.advance('A', 1)
+        entered = threading.Event()
+        playback_spawn = Mock()
+        children = []
+        def spawn(args, **kwargs):
+            self.assertEqual(args[0], '/usr/bin/ffmpeg')
+            self.assertIn('atempo=1.25', args)
+            self.assertIn('-nostdin', args)
+            child = subprocess.Popen(['/bin/sleep', '10'])
+            children.append((child, args[-1])); entered.set()
+            return child
+        self.scope['subprocess'] = types.SimpleNamespace(
+            Popen=spawn, DEVNULL=subprocess.DEVNULL,
+            TimeoutExpired=subprocess.TimeoutExpired, CalledProcessError=subprocess.CalledProcessError)
+        result = []
+        thread = threading.Thread(target=lambda: result.append(self.scope['real_play_audio'](
+            types.SimpleNamespace(item=self.job('A')), 'original.wav')))
+        thread.start(); self.assertTrue(entered.wait(1))
+        start = time.monotonic(); self.advance('B', 2); thread.join(1)
+        self.assertFalse(thread.is_alive())
+        self.assertLess(time.monotonic() - start, .5)
+        self.assertEqual(result, ['stale'])
+        self.assertEqual(len(children), 1)
+        self.assertIsNotNone(children[0][0].poll())
+        self.assertFalse(Path(children[0][1]).exists())
+
+    def test_tempo_failure_preserves_original_and_cleans_temporary(self):
+        self.advance('A', 1)
+        original = self.root / 'original.wav'; original.write_bytes(b'original')
+        converter = Mock(returncode=1, args=['/usr/bin/ffmpeg'])
+        converter.poll.return_value = 1
+        spawn = Mock()
+        self.scope['subprocess'] = self.process_api(spawn, converter)
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.scope['real_play_audio'](types.SimpleNamespace(item=self.job('A')), str(original))
+        spawn.assert_not_called()
+        self.assertEqual(original.read_bytes(), b'original')
