@@ -191,6 +191,30 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(self.scope['recovery_clauses'](text), ['승인을 받아', '/tmp/example-long-directory/approval-marker.txt'])
         self.assertEqual(self.scope['recovery_clauses']('/tmp/example-long-directory/approval-marker.txt'), [])
 
+    def test_recovery_keeps_conditional_and_time_clauses_together(self):
+        for text, expected in (
+            ('문제가 발견되면 원인을 하나씩 분리해서 확인하겠다.',
+             ['문제가 발견되면', '원인을 하나씩 분리해서 확인하겠다.']),
+            ('원인을 분석한 다음 새로운 방법을 시험하는 과정이라고 생각한다.',
+             ['원인을 분석한 다음', '새로운 방법을 시험하는 과정이라고 생각한다.']),
+        ):
+            parts = self.scope['recovery_clauses'](text)
+            self.assertEqual(parts, expected)
+            self.assertEqual(' '.join(parts), text)
+
+    def test_recovery_boundary_change_keeps_existing_comma_and_short_fallback(self):
+        for text, expected in (
+            ('시스템의 상태를 정확하게 이해하고, 변경하기 전에 기준값을',
+             ['시스템의 상태를 정확하게 이해하고,', '변경하기 전에 기준값을']),
+            ('안녕. 오늘도 필요한 작업을 하나씩 확인해 볼게.',
+             ['안녕. 오늘도 필요한', '작업을 하나씩 확인해 볼게.']),
+            ('오류가 발생한 건 아니야? 다음 단계로 넘어가도 괜찮을까?',
+             ['오류가 발생한 건 아니야?', '다음 단계로 넘어가도 괜찮을까?']),
+            ('복구했어. 다음 단계는 사용자의 판단을 기다릴게.',
+             ['복구했어. 다음 단계는', '사용자의 판단을 기다릴게.']),
+        ):
+            self.assertEqual(self.scope['recovery_clauses'](text), expected)
+
     def test_analyzer_signals_are_separate(self):
         capture = self.scope['GenerationWarnings']()
         def emit(message):

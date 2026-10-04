@@ -236,7 +236,12 @@ def recovery_clauses(text):
         # two-word connective clause, but never a tiny single-word fragment.
         if any(len(part) < (6 if len(part.split()) >= 2 else 8) for part in (left, right)):
             continue
-        clause = bool(re.search(r"[,;:]$|(?:으며|면서|지만|며|하고|이고|하며|때문에)$", words[index - 1]))
+        # Keep conditional/time clauses together when recovering a rejected
+        # sentence, rather than balancing through the following noun phrase.
+        clause = bool(re.search(r"[,;:]$|(?:으며|면서|지만|며|하고|이고|하며|때문에|으면|다면|라면|하면|되면)$", words[index - 1]))
+        # '분석한 다음' ends a time clause; '다음 단계' starts a noun phrase.
+        clause = clause or (index >= 2 and words[index - 1] == '다음'
+                            and bool(re.search(r"(?:한|된|은)$", words[index - 2])))
         choices.append((not clause, abs(len(left) - len(right)), index, left, right))
     if not choices:
         return []
