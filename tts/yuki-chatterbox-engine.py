@@ -50,75 +50,8 @@ def conditioning_state(model):
 
 
 def normalize_paths(text):
-    """TTS-only filesystem descriptions, before splitting or number conversion.
-
-    Return explicit replacements as well as text; never mutate the source job.
-    URLs and ordinary slash expressions cannot start a match.
-    """
-    extensions = {
-        'py': '파이썬 파일', 'md': '마크다운 파일', 'sh': '셸 스크립트',
-        'json': '제이슨 파일', 'txt': '텍스트 파일', 'wav': '웨이브 오디오 파일',
-        'log': '로그 파일', 'toml': '톰엘 설정 파일', 'yaml': '야믈 설정 파일',
-        'yml': '야믈 설정 파일', 'cpp': '씨 플러스 플러스 소스 파일',
-        'cc': '씨 플러스 플러스 소스 파일', 'h': '헤더 파일', 'hpp': '헤더 파일',
-        'rs': '러스트 소스 파일', 'js': '자바스크립트 파일', 'ts': '타입스크립트 파일',
-    }
-    names = {'yuki': '유키', 'engine': '엔진', 'enikk': '에닉', 'readme': '리드미',
-             'install': '인스톨', 'license': '라이선스', 'changelog': '체인지로그',
-             'makefile': '메이크파일', 'chatterbox': '채터박스', 'test': '테스트', 'output': '아웃풋',
-             'approval': '승인', 'marker': '표시'}
-    # Delimited paths may contain Korean filenames. Attached Korean particles
-    # after a known extension are prose, not part of that filename.
-    pattern = re.compile(
-        r"(?<![\w/:.])(?P<path>`?(?:(?:/(?:home|tmp|usr|etc|var|opt)/|~/|\.\.?/)[^\s`\"'<>()[\]{}]+"
-        r"|(?P<known_report>(?<![@-])report_v31\.1\.md(?![A-Za-z0-9_-]|\.[A-Za-z0-9_])))`?)"
-        r"(?(known_report)(?:(?P<filename_particle>으로|에서|을|를|은|는|이|가|에|로|와|과|도)(?=\s|[.!?,]|$))?|)"
-        r"(?:\s+(?:파일|경로)(?P<particle>에서|으로|을|를|은|는|이|가|에|로|(?(known_report)도|(?!)))?(?=\s|[.!?,]|$))?")
-    records = []
-
-    def replace(match):
-        raw = match.group('path')
-        path = raw.strip('`')
-        tail = ''
-        while path and path[-1] in '.,!?:;':
-            tail = path[-1] + tail
-            path = path[:-1]
-        attached = re.search(r'\.(?:' + '|'.join(extensions) + r')(을|를|은|는|이|가|에서|에|로|으로)$', path, re.I)
-        if attached:
-            tail = attached.group(1) + tail
-            path = path[:-len(attached.group(1))]
-        basename = path.rstrip('/').rsplit('/', 1)[-1]
-        stem, dot, extension = basename.rpartition('.')
-        if not dot:
-            stem, extension = basename, ''
-        description = extensions.get(extension.lower(), '파일')
-        # Machine identifiers are intentionally described, not spelled out.
-        machine = (len(stem) > 48 or bool(re.fullmatch(r'[0-9a-fA-F-]{16,}', stem))
-                   or any(len(token) > 20 for token in re.split(r'[-_.]', stem)))
-        spoken = '' if machine else ' '.join(names.get(token.lower(), token)
-                                             for token in re.split(r'[-_.]+', stem) if token)
-        if basename == 'report_v31.1.md':
-            if '/' not in path:
-                surrounding = (re.search(r'\S*$', text[:match.start()]).group()
-                               + match.group() + re.match(r'\S*', text[match.end():]).group())
-                if '://' in surrounding or '@' in surrounding:
-                    return match.group()
-            # USER-confirmed bad filename reading; preserve original/span accounting.
-            # Keep version digits for NeMo, and do not rewrite ordinary 'report'.
-            spoken = '리포트 버전 31 점 1'
-        kind = '경로' if '/' in path else ''
-        result = ' '.join(filter(None, (spoken, description, kind)))
-        tail += match.group('filename_particle') or match.group('particle') or ''
-        if not kind:
-            tail = re.sub(r'^(를|는|가|와)', lambda m: {'를': '을', '는': '은', '가': '이', '와': '과'}[m[0]], tail)
-        if kind:
-            tail = re.sub(r'^(을|이|은|으로)', lambda m: {'을': '를', '이': '가', '은': '는', '으로': '로'}[m[0]], tail)
-        records.append({'original': raw, 'description': result, 'span': match.span(),
-                        'replaced_text': match.group(0), 'spoken': result + tail})
-        return result + tail
-
-    normalized = pattern.sub(replace, text)
-    return normalized, records
+    """Delegate Yuki path descriptions; retain source replacement accounting."""
+    return tn.overrides.normalize_paths(text)
 
 
 def sentences(text):

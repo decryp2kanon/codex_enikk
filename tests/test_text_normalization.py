@@ -14,7 +14,7 @@ spec.loader.exec_module(tn)
 
 class NormalizationTests(unittest.TestCase):
     def test_only_proper_names(self):
-        self.assertEqual(tn.proper_names('Yuki Enikk Sugarchain Python CUDA YukiXYZ'),
+        self.assertEqual(tn.overrides.proper_names('Yuki Enikk Sugarchain Python CUDA YukiXYZ'),
                          '유키 에닉 슈가체인 Python CUDA YukiXYZ')
 
     def test_missing_environment_fails_closed(self):
@@ -125,7 +125,7 @@ class WorkerNormalizationFailureTests(unittest.TestCase):
 
 class ExceptionBoundaryTests(unittest.TestCase):
     def test_thousands_groups_only(self):
-        pattern = tn.GROUPED_INTEGER
+        pattern = tn.overrides.GROUPED_INTEGER
         convert = lambda t: pattern.sub(lambda m:m.group().replace(',', ''), t)
         self.assertEqual(convert('1,024개와 45,000원, 1,234,567.89'), '1024개와 45000원, 1234567.89')
         self.assertEqual(convert('1,024, 다음 숫자는 2,048이다.'), '1024, 다음 숫자는 2048이다.')
@@ -136,26 +136,26 @@ class ExceptionBoundaryTests(unittest.TestCase):
         class Identity:
             def normalize(self, text):return text
         text = '일반 일반적인 일반은 일요일 반 열은 월별 월요일 정상'
-        self.assertEqual(tn.normalize_with_exceptions(text, Identity()), text)
+        self.assertEqual(tn.overrides.normalize_with_exceptions(text, Identity().normalize), text)
 
     def test_only_digit_bearing_file_identifiers_are_protected(self):
-        self.assertIsNone(tn.KNOWN_PROTECTED.search('test.wav'))
-        self.assertIsNotNone(tn.KNOWN_PROTECTED.fullmatch('report_v31.1.md'))
-        self.assertIsNotNone(tn.KNOWN_PROTECTED.fullmatch('test.mp3'))
+        self.assertIsNone(tn.overrides.KNOWN_PROTECTED.search('test.wav'))
+        self.assertIsNotNone(tn.overrides.KNOWN_PROTECTED.fullmatch('report_v31.1.md'))
+        self.assertIsNotNone(tn.overrides.KNOWN_PROTECTED.fullmatch('test.mp3'))
 
     def test_heard_terms_do_not_change_words_identifiers_or_addresses(self):
         for text in ['Pythonic', 'MyPython', 'CPU2', 'CPU_core', 'xGPU', 'TTS_ENGINE',
                      'APIs', 'VRAM_cache', 'Python.py', 'report', 'API-user',
                      'https://example.com/?name=CPU', 'x+API@example.com']:
-            self.assertEqual(tn.heard_error_readings(text), text)
-        self.assertEqual(tn.heard_error_readings('Python. CPU의 GPU와 VRAM은 TTS API를'),
+            self.assertEqual(tn.overrides.heard_error_readings(text), text)
+        self.assertEqual(tn.overrides.heard_error_readings('Python. CPU의 GPU와 VRAM은 TTS API를'),
                          '파이썬. 씨피유의 지피유와 브이램은 티티에스 에이피아이를')
 
     def test_markers_cannot_collide_with_input(self):
         class Identity:
             def normalize(self, text):return text
         text = '\ue000 일반 \ue001 .mp3'
-        self.assertEqual(tn.normalize_with_exceptions(text, Identity()), text)
+        self.assertEqual(tn.overrides.normalize_with_exceptions(text, Identity().normalize), text)
 
     def test_lost_or_duplicate_protection_fails_closed(self):
         class Dropping:
@@ -164,12 +164,12 @@ class ExceptionBoundaryTests(unittest.TestCase):
             def normalize(self, text):return text + text
         for bad in [Dropping(), Duplicating()]:
             with self.assertRaisesRegex(RuntimeError, 'lost or duplicated'):
-                tn.normalize_with_exceptions('일반', bad)
+                tn.overrides.normalize_with_exceptions('일반', bad.normalize)
 
     def test_byte_units_are_case_sensitive_and_identifiers_not_units(self):
         for text in ['8Gb', '8gb', 'test8GB', 'test_8GB', '8GBPS', 'test-8GB', '3-8GB']:
-            self.assertIsNone(tn.NUMBER_UNIT.search(text))
-        self.assertEqual(tn.NUMBER_UNIT.fullmatch('-8GB').group('number'), '-8')
+            self.assertIsNone(tn.overrides.NUMBER_UNIT.search(text))
+        self.assertEqual(tn.overrides.NUMBER_UNIT.fullmatch('-8GB').group('number'), '-8')
 
 
 @unittest.skipUnless((Path.home() / 'Apps/enikk-nemo-tn/.venv/bin/python').is_file(), 'isolated NeMo unavailable')
@@ -240,3 +240,31 @@ class KnownErrorIntegrationTests(unittest.TestCase):
         self.assertEqual(result.count('천이십사'), 24)
         self.assertEqual(result.count('킬로헤르츠'), 24)
         self.assertFalse(any('\ue000' <= c <= '\uf8ff' for c in result))
+
+
+class LayerSeparationTests(unittest.TestCase):
+    def test_public_tn_callback_sees_protected_text_once(self):
+        public = Mock()
+        public.normalize.side_effect = lambda text: text
+        value = tn.overrides.normalize_with_exceptions('일반 Python', public.normalize)
+        self.assertEqual(value, '일반 파이썬')
+        public.normalize.assert_called_once()
+        self.assertNotIn('일반', public.normalize.call_args.args[0])
+        self.assertIn('파이썬', public.normalize.call_args.args[0])
+
+    def test_custom_module_is_independent_of_nvidia_and_gpu(self):
+        import ast
+        tree = ast.parse(Path(tn.overrides.__file__).read_text())
+        imports = [node for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom))]
+        self.assertEqual(len(imports), 1)
+        self.assertIsInstance(imports[0], ast.Import)
+        self.assertEqual([alias.name for alias in imports[0].names], ['re'])
+        wrapper = SOURCE.read_text()
+        self.assertIn('from nemo_text_processing.text_normalization.normalize import Normalizer', wrapper)
+        self.assertNotIn('HEARD_ERRORS =', wrapper)
+        self.assertNotIn('KNOWN_UNITS =', wrapper)
+
+    def test_install_and_update_preserve_custom_module(self):
+        for name in ['install.sh', 'update.sh']:
+            self.assertIn('yuki-text-normalization-overrides.py',
+                          (SOURCE.parents[1] / name).read_text())

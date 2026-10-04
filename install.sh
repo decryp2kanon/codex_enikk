@@ -39,7 +39,7 @@ trap cleanup EXIT
 for file in enikk.py latest.py persistence.py restore.py check_codex_compat.py handoff_command.py submission_arbiter.py trigger_transport.py trigger_service.py trigger_client.py README.md LICENSE VERSION uninstall.sh "${commands[@]}"; do
     install -m 644 -- "$source_dir/$file" "$lib/$file"
 done
-for file in README.md setup-tts.sh setup-nemo-tn.sh yuki-text-normalization.py yuki-chatterbox-engine.py yuki-codex-notify.py yuki-codex-rollout-watch.py yuki-codex-stream.py; do
+for file in README.md setup-tts.sh setup-nemo-tn.sh yuki-text-normalization.py yuki-text-normalization-overrides.py yuki-chatterbox-engine.py yuki-codex-notify.py yuki-codex-rollout-watch.py yuki-codex-stream.py; do
     install -m 644 -- "$source_dir/tts/$file" "$lib/tts/$file"
 done
 install -m 644 -- "$source_dir/tts/assets/yuki_super-clean.wav" "$lib/tts/assets/yuki_super-clean.wav"

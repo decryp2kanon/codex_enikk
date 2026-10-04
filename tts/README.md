@@ -254,3 +254,40 @@ and run `codex_enikk resume <thread-id>` to load the new worker. Retain the prev
 managed installation when testing; a rollback restores the previous engine and
 removes the new normalization module from the execution path, without deleting
 models, references or the dedicated CPU environment.
+
+
+### NeMo adapter and Yuki overrides
+
+`yuki-text-normalization.py` owns the persistent CPU protocol and the public
+`nemo_text_processing.text_normalization.normalize.Normalizer` construction.
+It delegates exceptions to `yuki-text-normalization-overrides.py`, which imports
+only Python's `re` and does not modify NVIDIA package files. Update the pinned
+NeMo environment independently of this versioned local override module.
+
+The engine calls `normalize_paths` through the override module once, preserving
+original text and replacement/span accounting. Then names and narrow protection
+run before public NeMo TN; protected spans are restored only after checking that
+each marker survived exactly once. Numeric unit values use the same public TN
+instance; no second dictionary or Korean G2P pass is added.
+
+Override reasons and reproducers remain explicit:
+
+- Yuki/Enikk/Sugarchain: USER-defined identity names; `test_only_proper_names`.
+- Standalone 일반: upstream's 일요일 반 error; `test_no_general_korean_rewriting`
+  and the installed Korean grammar fixtures.
+- Valid thousands groups: upstream comma splitting;
+  `test_thousands_groups_only` and grammar fixtures.
+- Attached GB/MB/TB/kHz/kbps/km/h: reproduced unit readings;
+  `test_byte_units_are_case_sensitive_and_identifiers_not_units` and integration fixtures.
+- Python/CPU/GPU/TTS/API/VRAM: USER-confirmed listening exceptions;
+  `test_heard_terms_do_not_change_words_identifiers_or_addresses`.
+- Digit-bearing filename protection and report_v31.1.md path description:
+  identifier preservation and observed version/particle errors;
+  `test_only_digit_bearing_file_identifiers_are_protected` and delivery `PathTests`.
+- Marker restoration: fail closed on lost/duplicated spans;
+  `test_lost_or_duplicate_protection_fails_closed`.
+
+This is a structural separation, not a new pronunciation correction. Upstream
+limitations and remaining human listening requirements are unchanged. Install
+and update scripts copy both modules; this change alone does not update a
+running or managed installation.

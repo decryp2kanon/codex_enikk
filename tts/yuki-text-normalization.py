@@ -1,98 +1,21 @@
 #!/usr/bin/env python3
 """Persistent CPU NeMo Korean TN; never imports or changes the GPU environment."""
 import atexit
+import importlib.util
 import json
 import os
 from pathlib import Path
-import re
 import select
 import subprocess
 import sys
 import threading
 import time
 
-# User-defined names, not a general pronunciation dictionary.
-NAMES = {'Yuki': '유키', 'Enikk': '에닉', 'Sugarchain': '슈가체인'}
-
-
-def proper_names(text):
-    return re.sub(r'(?<![A-Za-z])(?:Yuki|Enikk|Sugarchain)(?![A-Za-z])',
-                  lambda m: NAMES[m.group()], text, flags=0)
-
-
-# Reproduced NeMo errors and USER-confirmed unit readings. Case matters: GB != Gb.
-# Other numeric/SI rules, ordinary Korean and mathematical operators stay upstream.
-GROUPED_INTEGER = re.compile(r'(?<![A-Za-z0-9_.,])[1-9]\d{0,2}(?:,\d{3})+(?!\d|,\d)')
-KNOWN_UNITS = {'GB': '기가바이트', 'MB': '메가바이트', 'TB': '테라바이트',
-               'kHz': '킬로헤르츠', 'kbps': '킬로비트 퍼 초', 'km/h': '킬로미터 퍼 아워'}
-NUMBER_UNIT = re.compile(r'(?<![A-Za-z0-9_.,+-])(?P<number>-?\d+(?:\.\d+)?)'
-                        r'(?P<unit>GB|MB|TB|kHz|kbps|km/h)(?![A-Za-z0-9_])')
-# Relative filename tokens and the known digit-bearing extension remain identifiers.
-# Absolute filesystem paths have already gone through the separate path-description layer.
-KNOWN_PROTECTED = re.compile(
-    r'(?<![\w])일반(?![\w])'
-    r'|(?<![\w/])(?=[A-Za-z0-9_.-]*\d)[A-Za-z0-9][A-Za-z0-9_.-]*\.(?:py|md|sh|json|txt|wav|mp3|log|toml|yaml|yml|cpp|rs|js|ts)(?![A-Za-z0-9_.])'
-    r'|(?<![\w.])\.mp3(?![A-Za-z0-9_])')
-
-
-# Explicit USER listening failures only; not a general English or letter dictionary.
-HEARD_ERRORS = {'Python': '파이썬', 'CPU': '씨피유', 'TTS': '티티에스',
-                'API': '에이피아이', 'GPU': '지피유', 'VRAM': '브이램',
-                'km/h': '킬로미터 퍼 아워'}
-HEARD_TOKEN = re.compile(r'(?<![A-Za-z0-9_./@-])(?:Python|CPU|TTS|API|GPU|VRAM|km/h)'
-                         r'(?![A-Za-z0-9_/@-]|\.[A-Za-z0-9_])')
-
-
-def heard_error_readings(text):
-    def replace(match):
-        # Do not reinterpret tokens inside URL/email literals as prose words.
-        left = re.search(r'\S*$', text[:match.start()]).group()
-        right = re.match(r'\S*', text[match.end():]).group()
-        token = left + match.group() + right
-        if '://' in token or '@' in token:
-            return match.group()
-        return HEARD_ERRORS[match.group()]
-    return HEARD_TOKEN.sub(replace, text)
-
-
-def normalize_with_exceptions(text, normalizer):
-    """Protect reproduced errors, run public TN, restore only our own exact spans.
-
-    Each transformed span is normalized once. Opaque markers never reach the GPU.
-    The private-use markers are chosen outside the input and checked for loss or
-    duplication rather than repairing arbitrary words in the final output.
-    """
-    if not text.strip():
-        return text
-    text = proper_names(text)
-    protected = {}
-    available = (chr(i) for i in range(0xE000, 0xF900) if chr(i) not in text)
-
-    def protect(value):
-        token = next(available, None)
-        if token is None:
-            raise ValueError('too many protected normalization spans')
-        protected[token] = value
-        return token
-
-    text = KNOWN_PROTECTED.sub(lambda match: protect(match.group()), text)
-    # Strip commas only from syntactically valid thousands groups, not prose commas.
-    text = GROUPED_INTEGER.sub(lambda match: match.group().replace(',', ''), text)
-
-    def unit(match):
-        number = normalizer.normalize(match.group('number'))
-        if not number.strip():
-            raise RuntimeError('empty normalized number')
-        return protect(number + ' ' + KNOWN_UNITS[match.group('unit')])
-
-    text = NUMBER_UNIT.sub(unit, text)
-    text = heard_error_readings(text)
-    result = normalizer.normalize(text)
-    for token, value in protected.items():
-        if result.count(token) != 1:
-            raise RuntimeError('protected normalization span lost or duplicated')
-        result = result.replace(token, value)
-    return result
+# Local overrides are versioned separately from the public NeMo API adapter.
+_override_spec = importlib.util.spec_from_file_location(
+    'yuki_tn_overrides', Path(__file__).with_name('yuki-text-normalization-overrides.py'))
+overrides = importlib.util.module_from_spec(_override_spec)
+_override_spec.loader.exec_module(overrides)
 
 
 class Client:
@@ -196,7 +119,7 @@ def serve():
         try:
             text = json.loads(line)['text']
             # Public NeMo TN with bounded, reproduced-error protection; no Korean G2P.
-            result = normalize_with_exceptions(text, normalizer)
+            result = overrides.normalize_with_exceptions(text, normalizer.normalize)
             print(json.dumps({'text': result}, ensure_ascii=False), flush=True)
         except Exception as error:
             print(json.dumps({'error': type(error).__name__ + ': ' + str(error)}), flush=True)

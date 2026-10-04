@@ -2,6 +2,7 @@
 import ast
 import fcntl
 import json
+import importlib.util
 import logging
 import os
 from pathlib import Path
@@ -18,6 +19,11 @@ from unittest.mock import Mock, patch
 
 SOURCE = Path(__file__).resolve().parents[1] / 'tts/yuki-chatterbox-engine.py'
 
+_override_spec = importlib.util.spec_from_file_location(
+    'delivery_overrides', SOURCE.with_name('yuki-text-normalization-overrides.py'))
+overrides = importlib.util.module_from_spec(_override_spec)
+_override_spec.loader.exec_module(overrides)
+
 
 def definitions():
     tree = ast.parse(SOURCE.read_text())
@@ -30,7 +36,7 @@ def definitions():
                    and any(isinstance(target, ast.Name) and target.id in constants for target in node.targets)]
     tree.body = [node for node in tree.body if getattr(node, 'name', None) in names]
     tree.body = assignments + tree.body
-    scope = dict(tn=types.SimpleNamespace(initialize=Mock(), normalize=Mock(side_effect=lambda text:text)), Path=Path, os=os, tempfile=tempfile, json=json, threading=threading,
+    scope = dict(tn=types.SimpleNamespace(overrides=overrides, initialize=Mock(), normalize=Mock(side_effect=lambda text:text)), Path=Path, os=os, tempfile=tempfile, json=json, threading=threading,
                  time=time, subprocess=types.SimpleNamespace(run=Mock(), DEVNULL=subprocess.DEVNULL),
                  queue=queue, logging=logging, fcntl=fcntl, re=re, log=Mock(), STATE=Path('/unused'),
                  notify=types.SimpleNamespace(epoch_valid=lambda *args: True, epoch_lock=lambda *args: nullcontext()))
