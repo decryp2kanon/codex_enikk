@@ -720,6 +720,13 @@ while True: time.sleep(1)
         self.assertEqual((previous[0] / 'enikk.py').read_text(), 'print("old version")\n')
         self.assertEqual((lib / 'enikk.py').read_bytes(), (ROOT / 'enikk.py').read_bytes())
         self.assertEqual(session.read_bytes(), original)
+        for name in ('handoff_command.py', 'submission_arbiter.py', 'trigger_transport.py',
+                     'trigger_service.py', 'trigger_client.py', 'enikk-trigger'):
+            self.assertEqual((lib / name).read_bytes(), (ROOT / name).read_bytes())
+        self.assertEqual((prefix / 'bin/enikk-trigger').resolve(), lib / 'enikk-trigger')
+        trigger_help = subprocess.run([str(prefix / 'bin/enikk-trigger'), '--help'], env=env,
+                                      capture_output=True, text=True)
+        self.assertEqual(trigger_help.returncode, 0, trigger_help.stderr)
         self.assertEqual((lib / 'tts/yuki-codex-stream.py').read_bytes(), (ROOT / 'tts/yuki-codex-stream.py').read_bytes())
         audio = (lib / 'tts/yuki-chatterbox-engine.py').read_text()
         self.assertEqual(audio, (ROOT / 'tts/yuki-chatterbox-engine.py').read_text())

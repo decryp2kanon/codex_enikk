@@ -14,7 +14,7 @@ if [[ -L "$lib" || ! -f "$lib/.installed-by-codex-enikk" || "$(cat "$lib/.instal
     echo "설치 소유권을 확인할 수 없어 중단합니다: $lib" >&2
     exit 1
 fi
-for name in codex_enikk codex_session_save.sh codex_enikk_restore check-codex-compat; do
+for name in codex_enikk codex_session_save.sh codex_enikk_restore check-codex-compat enikk-trigger; do
     if [[ -L "$base/bin/$name" && "$(readlink -- "$base/bin/$name")" == "../lib/codex_enikk/$name" ]]; then
         rm -- "$base/bin/$name"
     fi
