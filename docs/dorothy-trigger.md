@@ -1,9 +1,10 @@
-# Local Dorothy trigger (candidate, opt-in)
+# Local Dorothy trigger (enabled by default)
 
-Start the wrapper with `CODEX_ENIKK_TRIGGER=1` to enable a wrapper-owned submission
+Start the wrapper with `codex_enikk` to use the default wrapper-owned submission
 proxy and trigger receiver. The current session must first finish its turn/tools
 and drain TTS before a normal same-thread restart. Do not bypass the wrapper lock.
-This feature is not enabled by copying files into an already-running wrapper.
+Set `CODEX_ENIKK_TRIGGER=0` to disable it. Updating an already-running wrapper
+does not change its active receiver; a normal restart is required.
 
 After validation/installation, Dorothy can run:
 

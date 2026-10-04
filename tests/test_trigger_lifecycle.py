@@ -15,7 +15,7 @@ class LifecycleTests(unittest.TestCase):
                 self.assertEqual(endpoint, 'unix:///old')
             launch.assert_not_called()
 
-    def test_wrapper_owns_proxy_and_shutdown_on_body_error(self):
+    def test_default_enabled_wrapper_owns_proxy_and_shutdown_on_body_error(self):
         with tempfile.TemporaryDirectory() as temp:
             process = Mock(); process.poll.return_value = None
             def launch(args, **kwargs):
@@ -24,7 +24,8 @@ class LifecycleTests(unittest.TestCase):
                 Path(args[args.index('--ready')+1]).write_text('{}')
                 return process
             version = subprocess.CompletedProcess([], 0, 'codex-cli 0.160.0\n', '')
-            with patch.dict(os.environ, {'CODEX_ENIKK_TRIGGER': '1'}), patch('enikk.Path.home', return_value=Path(temp)), patch('enikk.subprocess.run', return_value=version), patch('enikk.subprocess.Popen', side_effect=launch):
+            with patch.dict(os.environ), patch('enikk.Path.home', return_value=Path(temp)), patch('enikk.subprocess.run', return_value=version), patch('enikk.subprocess.Popen', side_effect=launch):
+                os.environ.pop('CODEX_ENIKK_TRIGGER', None)
                 with self.assertRaisesRegex(RuntimeError, 'native failure'):
                     with enikk.submission_proxy('unix:///upstream', 'same-thread', Path('/python')) as endpoint:
                         self.assertTrue(endpoint.startswith('unix:///tmp/enikk-arbiter-'))

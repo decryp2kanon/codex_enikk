@@ -335,10 +335,10 @@ FAIL 결과에는 위치와 expected/observed가 포함됩니다. 인증·네트
 ## Dorothy 자동 명령 전달
 
 자동 전달 receiver와 CLI도 관리 설치 및 업데이트에 포함됩니다.
-정상 종료 후 다음 명령으로 같은 Enikk 대화를 재개하면 활성화됩니다.
+브리지는 기본 활성화됩니다. 정상 종료 후 평소 명령으로 같은 대화를 재개하세요.
 
 ```bash
-CODEX_ENIKK_TRIGGER=1 codex_enikk
+codex_enikk
 ```
 
 검증된 Codex 0.160.0과 streaming 경로가 필요합니다. 실행 중인 앱에 파일만

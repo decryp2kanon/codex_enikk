@@ -767,7 +767,7 @@ def streaming_tts(session_id, python, script):
 @contextmanager
 def submission_proxy(endpoint, session_id, python):
     """Wrapper owns both submission paths; never spawn another Codex/TTS worker."""
-    if not endpoint or os.environ.get('CODEX_ENIKK_TRIGGER', '0') != '1':
+    if not endpoint or os.environ.get('CODEX_ENIKK_TRIGGER', '1') != '1':
         yield endpoint
         return
     version = subprocess.run(['codex', '--version'], capture_output=True, text=True, timeout=5)
