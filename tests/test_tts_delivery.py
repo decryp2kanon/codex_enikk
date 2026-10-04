@@ -23,14 +23,14 @@ def definitions():
     tree = ast.parse(SOURCE.read_text())
     names = {'DeliveryJob', 'playback', 'play_audio', 'run', 'GenerationWarnings', 'retire_alignment_hooks',
              'sentences', 'speech_chunks', 'segment_drop_reason', 'recovery_clauses', 'recover_generation',
-             'normalize_paths', 'korean_pronunciation', 'normalize_numbers', 'korean_integer', 'korean_number',
+             'normalize_paths', 'korean_pronunciation',
              'owner_alive', 'discard_stale_job'}
-    constants = {'KOREAN_TECH', 'KOREAN_LETTERS', 'KOREAN_DIGITS', 'SINO_DIGITS', 'DECIMAL_DIGITS'}
+    constants = set()
     assignments = [node for node in tree.body if isinstance(node, ast.Assign)
                    and any(isinstance(target, ast.Name) and target.id in constants for target in node.targets)]
     tree.body = [node for node in tree.body if getattr(node, 'name', None) in names]
     tree.body = assignments + tree.body
-    scope = dict(Path=Path, os=os, tempfile=tempfile, json=json, threading=threading,
+    scope = dict(tn=types.SimpleNamespace(initialize=Mock(), normalize=Mock(side_effect=lambda text:text)), Path=Path, os=os, tempfile=tempfile, json=json, threading=threading,
                  time=time, subprocess=types.SimpleNamespace(run=Mock(), DEVNULL=subprocess.DEVNULL),
                  queue=queue, logging=logging, fcntl=fcntl, re=re, log=Mock(), STATE=Path('/unused'),
                  notify=types.SimpleNamespace(epoch_valid=lambda *args: True, epoch_lock=lambda *args: nullcontext()))
@@ -96,8 +96,9 @@ class PathTests(unittest.TestCase):
         chunks = self.scope['speech_chunks'](normalized)
         self.assertEqual(' '.join(chunks).split(), normalized.split())
         self.assertNotIn('/tmp/', ' '.join(chunks))
-        self.assertEqual(self.scope['korean_pronunciation']('SUPER-CLEAN C2는 버전 31.1에서 3.2GB를 사용해.'),
-                         '슈퍼 클린 씨 투는 버전 삼십일 점 일에서 삼 점 이 기가바이트를 사용해.')
+        text = 'SUPER-CLEAN C2는 버전 31.1에서 3.2GB를 사용해.'
+        self.scope['korean_pronunciation'](text)
+        self.scope['tn'].normalize.assert_called_once_with(text)
 
     def test_only_explicit_path_spans_change(self):
         source = '알파 `/home/ak/test.py` 파일을 확인하고, 베타 /tmp/output.wav를 확인해. 감마 31.1 델타.'
