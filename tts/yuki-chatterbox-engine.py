@@ -33,67 +33,9 @@ JOBS = STATE / "jobs"
 # The final SUPER-CLEAN C2 reference is configured here (and may be overridden
 # explicitly for another installation without duplicating it in the notifier).
 REFERENCE = Path(os.environ.get("CODEX_ENIKK_CHATTERBOX_REFERENCE", Path.home() / "Apps/chatterbox-yuki/yuki_super-clean.wav"))
-KOREAN_TECH = {
-    "SUPER-CLEAN": "슈퍼 클린", "Chatterbox": "채터박스", "Codex": "코덱스",
-    "GitHub": "깃허브", "Git": "깃", "Python": "파이썬", "Linux": "리눅스",
-    "Ubuntu": "우분투", "CPU": "씨피유", "GPU": "지피유", "TTS": "티티에스",
-    "API": "에이피아이", "JSON": "제이슨", "WAV": "웨이브",
-    "FFmpeg": "에프에프엠펙", "CUDA": "쿠다", "RAM": "램",
-    "Bitcoin": "비트코인", "Sugarchain": "슈가체인", "fallback": "폴백",
-    "branch": "브랜치", "version": "버전",
-}
-KOREAN_LETTERS = dict(zip("ABCDEFGHIJKLMNOPQRSTUVWXYZ", (
-    "에이 비 씨 디 이 에프 지 에이치 아이 제이 케이 엘 엠 엔 오 피 큐 알 에스 티 유 브이 더블유 엑스 와이 지"
-).split()))
-KOREAN_DIGITS = {"0": "제로", "1": "원", "2": "투", "3": "쓰리", "4": "포", "5": "파이브",
-                 "6": "식스", "7": "세븐", "8": "에이트", "9": "나인"}
-SINO_DIGITS = "영일이삼사오육칠팔구"
-DECIMAL_DIGITS = "공일이삼사오육칠팔구"
-
-
-def korean_integer(value):
-    number = int(value)
-    if number == 0:
-        return "영"
-    small_units = ("", "십", "백", "천")
-    large_units = ("", "만", "억", "조")
-    groups = []
-    group_index = 0
-    while number:
-        group = number % 10000
-        if group:
-            spoken = ""
-            for position in range(3, -1, -1):
-                digit = group // (10 ** position) % 10
-                if digit:
-                    if digit != 1 or position == 0:
-                        spoken += SINO_DIGITS[digit]
-                    spoken += small_units[position]
-            groups.append(spoken + large_units[group_index])
-        number //= 10000
-        group_index += 1
-    return "".join(reversed(groups))
-
-
-def korean_number(value):
-    if "." not in value:
-        return korean_integer(value)
-    whole, fraction = value.split(".", 1)
-    fraction = fraction.rstrip("0") or "0"
-    return korean_integer(whole) + " 점 " + " ".join(DECIMAL_DIGITS[int(digit)] for digit in fraction)
-
-
-def normalize_numbers(text):
-    text = re.sub(r"(?i)(?<![A-Za-z])v(?=\d)", "버전 ", text)
-    units = {"gb": "기가바이트", "mb": "메가바이트"}
-    text = re.sub(
-        r"(?i)(?<![\d.])(\d+(?:\.\d+)?)(GB|MB)(?![A-Za-z])",
-        lambda match: f"{korean_number(match.group(1))} {units[match.group(2).lower()]}", text)
-    text = re.sub(r"(?<![\d.])(\d+(?:\.\d+)?)%", lambda match: korean_number(match.group(1)) + " 퍼센트", text)
-    text = re.sub(r"(?<![\d.])(\d+(?:\.\d+)?)(초|분)",
-                  lambda match: f"{korean_number(match.group(1))} {match.group(2)}", text)
-    text = re.sub(r"(?<![\d.])\d+(?:\.\d+)?(?![\d.])", lambda match: korean_number(match.group(0)), text)
-    return text
+_tn_spec = importlib.util.spec_from_file_location('yuki_tn', ROOT / 'yuki-text-normalization.py')
+tn = importlib.util.module_from_spec(_tn_spec)
+_tn_spec.loader.exec_module(tn)
 
 
 def log(message):
@@ -123,7 +65,7 @@ def normalize_paths(text):
     }
     names = {'yuki': '유키', 'engine': '엔진', 'enikk': '에닉', 'readme': '리드미',
              'install': '인스톨', 'license': '라이선스', 'changelog': '체인지로그',
-             'makefile': '메이크파일', 'test': '테스트', 'output': '아웃풋',
+             'makefile': '메이크파일', 'chatterbox': '채터박스', 'test': '테스트', 'output': '아웃풋',
              'approval': '승인', 'marker': '표시'}
     # Delimited paths may contain Korean filenames. Attached Korean particles
     # after a known extension are prose, not part of that filename.
@@ -153,7 +95,6 @@ def normalize_paths(text):
                    or any(len(token) > 20 for token in re.split(r'[-_.]', stem)))
         spoken = '' if machine else ' '.join(names.get(token.lower(), token)
                                              for token in re.split(r'[-_.]+', stem) if token)
-        spoken = korean_pronunciation(spoken) if spoken else ''
         result = ' '.join(filter(None, (spoken, description, '경로')))
         tail += match.group('particle') or ''
         tail = re.sub(r'^(을|이|은|으로)', lambda m: {'을': '를', '이': '가', '은': '는', '으로': '로'}[m[0]], tail)
@@ -347,17 +288,8 @@ def trim_edge_silence(wav, sample_rate):
 
 
 def korean_pronunciation(text):
-    """Keep displayed text intact while giving common technical terms Korean readings."""
-    pattern = re.compile(r"(?<![A-Za-z])(?:" + "|".join(map(re.escape, sorted(KOREAN_TECH, key=len, reverse=True))) + r")(?![A-Za-z])", re.I)
-    canonical = {key.lower(): value for key, value in KOREAN_TECH.items()}
-    text = pattern.sub(lambda match: canonical[match.group(0).lower()], text)
-    text = re.sub(
-        r"(?<![A-Za-z0-9])([A-Za-z])(\d)(?![A-Za-z0-9])",
-        lambda match: f"{KOREAN_LETTERS[match.group(1).upper()]} {KOREAN_DIGITS[match.group(2)]}",
-        text,
-    )
-    text = normalize_numbers(text)
-    return re.sub(r"(?<![A-Za-z])[A-Z]{2,}(?![A-Za-z])", lambda match: "".join(KOREAN_LETTERS[c] for c in match.group(0)), text)
+    """Normalize reading text with the persistent CPU NeMo Korean grammar."""
+    return tn.normalize(text)
 
 
 def suspicious_audio(wav, sample_rate, text):
@@ -604,6 +536,7 @@ def run():
         # Per-run launch lock above; one model across all run namespaces below.
         log(f"Chatterbox waiting_model_lock run_id={os.environ.get('CODEX_ENIKK_TTS_RUN_ID')}")
         fcntl.flock(model_lock, fcntl.LOCK_EX)
+        tn.initialize()
         started = time.monotonic()
         device = "cuda" if torch.cuda.is_available() else "cpu"
         log(f"loading Chatterbox multilingual model on {device}; first run may download model files")
@@ -637,8 +570,17 @@ def run():
                         start, end = record['span']
                         natural = natural[:start] + natural[end:]
                     log(f"Chatterbox job={item['id']} path_accounting natural_text_tokens={len(natural.split())} path_tokens={len(path_records)} normalized_path_descriptions={len(path_records)}")
-                originals = speech_chunks(spoken_text)
-                candidates = [korean_pronunciation(part) for part in originals]
+                try:
+                    normalized_text = korean_pronunciation(spoken_text)
+                except Exception as error:
+                    failed = DeliveryJob(path, item, [item['text']])
+                    for number in range(len(failed.parts)):
+                        if str(number) not in failed.terminal:
+                            failed.finish(number, 'failed', 'normalization: ' + str(error))
+                    log(f"Chatterbox normalization_failed job={item['id']} error={error!r}")
+                    continue
+                originals = speech_chunks(normalized_text)
+                candidates = originals
                 parts = []
                 for index, candidate in enumerate(candidates):
                     reason = segment_drop_reason(candidate)

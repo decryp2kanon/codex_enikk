@@ -69,7 +69,7 @@ if [[ ! -L "$checker" ]]; then
     ln -s -- ../lib/codex_enikk/check-codex-compat "$checker"
 fi
 tts_temporary="$(mktemp -d "$lib/.tts.XXXXXXXX")"
-for file in README.md setup-tts.sh yuki-chatterbox-engine.py yuki-codex-notify.py yuki-codex-rollout-watch.py yuki-codex-stream.py; do
+for file in README.md setup-tts.sh setup-nemo-tn.sh yuki-text-normalization.py yuki-chatterbox-engine.py yuki-codex-notify.py yuki-codex-rollout-watch.py yuki-codex-stream.py; do
     install -m 644 -- "$source_dir/tts/$file" "$tts_temporary/$file"
 done
 mkdir -- "$tts_temporary/assets"

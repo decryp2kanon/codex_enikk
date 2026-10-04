@@ -185,3 +185,38 @@ Completed stream jobs retain `.played-*` receipts; failed jobs retain `.failed-*
 records under that run's `jobs/`. These prevent same-run outbox recovery from replaying acknowledged
 jobs. They contain visible spoken text and are private runtime state, never
 repository assets. Retention/pruning is not automated.
+
+
+### Public Korean text normalization
+
+Reading text now uses NVIDIA NeMo Text Processing 1.2.0 Korean deterministic TN
+(Apache-2.0), with Pynini 2.1.6.post1. This is a public implementation, not a
+national standard or a guarantee of correct readings for every input.
+`setup-nemo-tn.sh` prepares a separate CPU environment at
+`~/Apps/enikk-nemo-tn`, builds the FAR cache once, and leaves the Chatterbox venv
+unchanged. `CODEX_ENIKK_TN_HOME` can select an alternate prepared environment.
+A persistent private helper initializes once per worker and handles subsequent
+requests without downloads or per-sentence process/model initialization.
+Readiness, writes and replies have bounded deadlines; failures are explicit,
+with no fallback to the old pronunciation tables. Codex remains usable if TTS
+initialization fails.
+
+Only the explicit names Yuki, Enikk and Sugarchain have project exceptions.
+General English is left to upstream, which often retains the original spelling.
+No additional Korean phonology/G2P is applied. Filesystem descriptions remain a
+separate path-only feature; the resulting full reading text is normalized once,
+then safely split, and the guard analyzes the same text sent to generation.
+Displayed source text and path replacement accounting are retained.
+
+Known upstream differences: `1,024` can become `일 , 영 이십사`, `일반 한국어`
+can become `일요일 반 한국어`, `44.1kHz` can become `사사.일kHz`, and `10/2`
+is treated as a fraction. Some operators and units remain untranslated; URLs and
+email addresses may be partially normalized. These are upstream outputs, not
+custom arithmetic interpretation. Version `3.10` retains its final zero.
+Do not interpret these outputs as validated mathematical or technical semantics.
+
+Current app processes are not hot-patched. After a managed update, exit normally
+and run `codex_enikk resume <thread-id>` to load the new worker. Retain the previous
+managed installation when testing; a rollback restores the previous engine and
+removes the new normalization module from the execution path, without deleting
+models, references or the dedicated CPU environment.
