@@ -460,16 +460,26 @@ class DeliveryJob:
 
 
 def play_audio(job, path):
-    # Serialize the last validity check and spawn with the user barrier commit.
-    with notify.epoch_lock(STATE):
-        if not notify.epoch_valid(job.item, STATE):
-            return 'stale'
-        audio_env = os.environ.copy()
-        audio_env.setdefault('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
-        audio_env.setdefault('PULSE_SERVER', f'unix:/run/user/{os.getuid()}/pulse/native')
-        child = subprocess.Popen(['/usr/bin/paplay', path], env=audio_env,
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Playback-only speed-up: preserve pitch while shortening spoken output by 25%.
+    # Generation is unchanged; ffmpeg atempo runs immediately before paplay.
+    speed_path = None
     try:
+        with tempfile.NamedTemporaryFile(prefix='yuki-1.25x-', suffix='.wav', delete=False) as tmp:
+            speed_path = tmp.name
+        subprocess.run([
+            '/usr/bin/ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+            '-i', path, '-filter:a', 'atempo=1.25', speed_path
+        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        # Serialize the last validity check and spawn with the user barrier commit.
+        with notify.epoch_lock(STATE):
+            if not notify.epoch_valid(job.item, STATE):
+                return 'stale'
+            audio_env = os.environ.copy()
+            audio_env.setdefault('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
+            audio_env.setdefault('PULSE_SERVER', f'unix:/run/user/{os.getuid()}/pulse/native')
+            child = subprocess.Popen(['/usr/bin/paplay', speed_path], env=audio_env,
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         while child.poll() is None:
             if not notify.epoch_valid(job.item, STATE):
                 child.terminate()  # Only this worker's exact playback child.
@@ -486,11 +496,16 @@ def play_audio(job, path):
             raise subprocess.CalledProcessError(child.returncode, child.args)
         return 'played'
     finally:
-        if child.poll() is None:
+        if 'child' in locals() and child.poll() is None:
             child.terminate()
             try: child.wait(timeout=.2)
             except subprocess.TimeoutExpired:
                 child.kill(); child.wait()
+        if speed_path:
+            try:
+                os.unlink(speed_path)
+            except FileNotFoundError:
+                pass
 
 
 def playback(ready):
