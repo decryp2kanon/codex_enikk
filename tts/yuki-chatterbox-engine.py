@@ -285,6 +285,23 @@ def recover_generation(text, attempt, reset, join, trace, valid=lambda: True):
     return join(recovered), None
 
 
+def retire_alignment_hooks(model):
+    """Release completed analyzers; each T3 call installs a fresh analyzer.
+
+    Preserve all other framework/user hooks. Run only after generate returns or
+    raises, while this worker remains the sole generation owner.
+    """
+    transformer = getattr(getattr(model, 't3', None), 'tfmr', None)
+    for layer in getattr(transformer, 'layers', ()):
+        attention = getattr(layer, 'self_attn', None)
+        hooks = getattr(attention, '_forward_hooks', {})
+        for key, hook in list(hooks.items()):
+            if (getattr(hook, '__module__', '') ==
+                    'chatterbox.models.t3.inference.alignment_stream_analyzer'
+                    and getattr(hook, '__name__', '') == 'attention_forward_hook'):
+                del hooks[key]
+
+
 class GenerationWarnings(logging.Handler):
     """Capture analyzer signals; token repetition alone remains informational."""
     def __init__(self):
@@ -647,6 +664,7 @@ def run():
                             return None, reason
                         finally:
                             anomaly_logger.removeHandler(warnings)
+                            retire_alignment_hooks(model)
                         if not notify.epoch_valid(item, STATE):
                             return None, 'STALE'
                         raw_duration = wav.shape[-1] / model.sr

@@ -21,7 +21,7 @@ SOURCE = Path(__file__).resolve().parents[1] / 'tts/yuki-chatterbox-engine.py'
 
 def definitions():
     tree = ast.parse(SOURCE.read_text())
-    names = {'DeliveryJob', 'playback', 'play_audio', 'run', 'GenerationWarnings',
+    names = {'DeliveryJob', 'playback', 'play_audio', 'run', 'GenerationWarnings', 'retire_alignment_hooks',
              'sentences', 'speech_chunks', 'segment_drop_reason', 'recovery_clauses', 'recover_generation',
              'normalize_paths', 'korean_pronunciation', 'normalize_numbers', 'korean_integer', 'korean_number',
              'owner_alive', 'discard_stale_job'}
@@ -200,6 +200,47 @@ class RecoveryTests(unittest.TestCase):
         emit('forcing EOS token, long_tail=tensor(True), alignment_repetition=tensor(False), token_repetition=False')
         self.assertEqual(capture.reason, 'internal_long_tail')
         self.assertEqual(capture.signals, {'token_repetition', 'long_tail', 'forced_eos'})
+
+
+class AnalyzerLifecycleTests(unittest.TestCase):
+    def test_retire_only_completed_analyzer_hooks(self):
+        scope = definitions()
+        def attention_forward_hook(*args):
+            pass
+        attention_forward_hook.__module__ = 'chatterbox.models.t3.inference.alignment_stream_analyzer'
+        framework_hook = Mock()
+        hooks = {1: attention_forward_hook, 2: framework_hook, 3: attention_forward_hook}
+        model = types.SimpleNamespace(t3=types.SimpleNamespace(tfmr=types.SimpleNamespace(
+            layers=[types.SimpleNamespace(self_attn=types.SimpleNamespace(_forward_hooks=hooks))])))
+        scope['retire_alignment_hooks'](model)
+        self.assertEqual(hooks, {2: framework_hook})
+        scope['retire_alignment_hooks'](model)
+        self.assertEqual(hooks, {2: framework_hook})
+
+    def test_similar_name_from_other_module_is_preserved(self):
+        scope = definitions()
+        def attention_forward_hook(*args):
+            pass
+        hooks = {1: attention_forward_hook}
+        model = types.SimpleNamespace(t3=types.SimpleNamespace(tfmr=types.SimpleNamespace(
+            layers=[types.SimpleNamespace(self_attn=types.SimpleNamespace(_forward_hooks=hooks))])))
+        scope['retire_alignment_hooks'](model)
+        self.assertIn(1, hooks)
+
+    def test_missing_analyzer_is_noop(self):
+        definitions()['retire_alignment_hooks'](types.SimpleNamespace())
+
+    def test_attempt_retires_hooks_even_on_generation_exception(self):
+        scope = definitions()
+        tree = ast.parse(SOURCE.read_text())
+        run = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'run')
+        attempt = next(n for n in ast.walk(run) if isinstance(n, ast.FunctionDef) and n.name == 'attempt')
+        model = types.SimpleNamespace(generate=Mock(side_effect=RuntimeError('injected')))
+        cleanup = Mock()
+        scope.update(model=model, item={}, trace=Mock(), retire_alignment_hooks=cleanup)
+        exec(compile(ast.Module(body=[attempt], type_ignores=[]), str(SOURCE), 'exec'), scope)
+        self.assertEqual(scope['attempt']('text', 1, 0, 0)[0], None)
+        cleanup.assert_called_once_with(model)
 
 
 class DeliveryTests(unittest.TestCase):
