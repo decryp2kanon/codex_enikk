@@ -256,19 +256,23 @@ removes the new normalization module from the execution path, without deleting
 models, references or the dedicated CPU environment.
 
 
-### NeMo adapter and Yuki overrides
+### NeMo adapter, optional upstream dictionary, and Yuki overrides
 
 `yuki-text-normalization.py` owns the persistent CPU protocol and the public
 `nemo_text_processing.text_normalization.normalize.Normalizer` construction.
-It delegates exceptions to `yuki-text-normalization-overrides.py`, which imports
-only Python's `re` and does not modify NVIDIA package files. Update the pinned
-NeMo environment independently of this versioned local override module.
+It has one explicit call into the optional, removable `tts/upstream/` dictionary
+before delegating to `yuki-text-normalization-overrides.py` and NeMo. The
+dictionary is separate from Yuki's custom exceptions and does not modify NVIDIA
+package files. Set `CODEX_ENIKK_TTS_UPSTREAM=0` to bypass it; if its runtime
+module is missing, input passes through to the existing custom + NeMo path.
+Update the pinned NeMo environment independently of both local layers.
 
 The engine calls `normalize_paths` through the override module once, preserving
 original text and replacement/span accounting. Then names and narrow protection
 run before public NeMo TN; protected spans are restored only after checking that
 each marker survived exactly once. Numeric unit values use the same public TN
-instance; no second dictionary or Korean G2P pass is added.
+instance. The optional upstream-derived exact-token dictionary adds no Korean
+G2P pass.
 
 Override reasons and reproducers remain explicit:
 

@@ -1,0 +1,19 @@
+{
+  "layer": "selected-korean-dictionary",
+  "classification": "SOURCE:UPSTREAM-DERIVED",
+  "version": 1,
+  "runtime_module": "selected_korean_dictionary.py",
+  "rules": [
+    {"id":"UDK-001","source_project":"myshell-ai/MeloTTS","source_snapshot":"209145371cff8fc3bd60d7be902ea69cbdb7965a","source_path":"melo/text/ko_dictionary.py","input":"AI","output":"에이아이","license":"MIT"},
+    {"id":"UDK-002","source_project":"myshell-ai/MeloTTS","source_snapshot":"209145371cff8fc3bd60d7be902ea69cbdb7965a","source_path":"melo/text/ko_dictionary.py","input":"CEO","output":"씨이오","license":"MIT"},
+    {"id":"UDK-003","source_project":"myshell-ai/MeloTTS","source_snapshot":"209145371cff8fc3bd60d7be902ea69cbdb7965a","source_path":"melo/text/ko_dictionary.py","input":"CCTV","output":"씨씨티비","license":"MIT"},
+    {"id":"UDK-004","source_project":"myshell-ai/MeloTTS","source_snapshot":"209145371cff8fc3bd60d7be902ea69cbdb7965a","source_path":"melo/text/ko_dictionary.py","input":"PC","output":"피씨","license":"MIT"},
+    {"id":"UDK-005","source_project":"myshell-ai/MeloTTS","source_snapshot":"209145371cff8fc3bd60d7be902ea69cbdb7965a","source_path":"melo/text/ko_dictionary.py","input":"SNS","output":"에스엔에스","license":"MIT"},
+    {"id":"UDK-006","source_project":"coqui-ai/TTS","source_snapshot":"dbf1a08a0d4e47fdad6172e433eeb34bc6b13b4e","source_path":"TTS/tts/utils/text/korean/ko_dictionary.py","input":"KOREA","output":"코리아","license":"MPL-2.0; mapping fact reimplemented, no upstream source copied"},
+    {"id":"UDK-007","source_project":"coqui-ai/TTS","source_snapshot":"dbf1a08a0d4e47fdad6172e433eeb34bc6b13b4e","source_path":"TTS/tts/utils/text/korean/ko_dictionary.py","input":"IDOL","output":"아이돌","license":"MPL-2.0; mapping fact reimplemented, no upstream source copied"},
+    {"id":"UDK-008","source_project":"coqui-ai/TTS","source_snapshot":"dbf1a08a0d4e47fdad6172e433eeb34bc6b13b4e","source_path":"TTS/tts/utils/text/korean/ko_dictionary.py","input":"IT","output":"아이티","license":"MPL-2.0; mapping fact reimplemented, no upstream source copied"},
+    {"id":"UDK-009","source_project":"coqui-ai/TTS","source_snapshot":"dbf1a08a0d4e47fdad6172e433eeb34bc6b13b4e","source_path":"TTS/tts/utils/text/korean/ko_dictionary.py","input":"IQ","output":"아이큐","license":"MPL-2.0; mapping fact reimplemented, no upstream source copied"}
+  ],
+  "boundary_policy": "Exact uppercase standalone prose tokens only; excludes identifier, path, URL, email, filename, equation, and code-token boundaries.",
+  "tests": ["tests/test_upstream_normalization.py", "tests/test_text_normalization.py"]
+}

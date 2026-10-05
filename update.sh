@@ -73,7 +73,11 @@ for file in README.md DEFERRED-ISSUES.md setup-tts.sh setup-nemo-tn.sh yuki-text
     install -m 644 -- "$source_dir/tts/$file" "$tts_temporary/$file"
 done
 mkdir -- "$tts_temporary/assets"
+mkdir -- "$tts_temporary/upstream"
 install -m 644 -- "$source_dir/tts/assets/yuki_super-clean.wav" "$tts_temporary/assets/yuki_super-clean.wav"
+for file in README.md manifest.json selected_korean_dictionary.py LICENSE-MELO.txt; do
+    install -m 644 -- "$source_dir/tts/upstream/$file" "$tts_temporary/upstream/$file"
+done
 chmod 755 "$tts_temporary/setup-tts.sh"
 rm -rf -- "$lib/tts"
 mv -- "$tts_temporary" "$lib/tts"

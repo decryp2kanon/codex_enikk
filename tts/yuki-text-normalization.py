@@ -18,6 +18,33 @@ overrides = importlib.util.module_from_spec(_override_spec)
 _override_spec.loader.exec_module(overrides)
 
 
+def _passthrough_upstream(text):
+    return text
+
+
+def _load_upstream_normalizer(module_path=None, enabled=None):
+    """Load the optional upstream layer, or preserve the legacy input path."""
+    if enabled is None:
+        enabled = os.environ.get('CODEX_ENIKK_TTS_UPSTREAM', '1') != '0'
+    if not enabled:
+        return _passthrough_upstream
+    path = module_path or Path(__file__).with_name('upstream') / 'selected_korean_dictionary.py'
+    if not path.is_file():
+        return _passthrough_upstream
+    spec = importlib.util.spec_from_file_location('yuki_upstream_dictionary', path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError('invalid upstream normalizer module')
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except (FileNotFoundError, ModuleNotFoundError):
+        return _passthrough_upstream
+    return module.apply
+
+
+_upstream_normalize = _load_upstream_normalizer()
+
+
 class Client:
     def __init__(self):
         self.process = None
@@ -118,6 +145,7 @@ def serve():
     for line in sys.stdin:
         try:
             text = json.loads(line)['text']
+            text = _upstream_normalize(text)
             # Public NeMo TN with bounded, reproduced-error protection; no Korean G2P.
             result = overrides.normalize_with_exceptions(text, normalizer.normalize)
             print(json.dumps({'text': result}, ensure_ascii=False), flush=True)

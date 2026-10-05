@@ -438,8 +438,10 @@ class LayerSeparationTests(unittest.TestCase):
 
     def test_install_and_update_preserve_custom_module(self):
         for name in ['install.sh', 'update.sh']:
-            self.assertIn('yuki-text-normalization-overrides.py',
-                          (SOURCE.parents[1] / name).read_text())
+            script = (SOURCE.parents[1] / name).read_text()
+            self.assertIn('yuki-text-normalization-overrides.py', script)
+            self.assertIn('selected_korean_dictionary.py', script)
+            self.assertIn('manifest.json', script)
 
 
 class SingleHourDurationTests(unittest.TestCase):
