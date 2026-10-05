@@ -19,6 +19,30 @@ from trigger_transport import accept_websocket, connect, peer_uid, rpc_object
 FIXTURE = '파일이나 코드를 변경하지 말고 다음 한 문장만 답해. 도로시 로컬 트리거 전달 확인 완료.\n\nEOF\n'
 SUBMITS = {'turn/start', 'turn/steer', 'review/start', 'thread/shellCommand', 'thread/compact/start'}
 
+# Explicit allow-list for work that may proceed through commit -> main -> push ->
+# user-prefix production update without asking for another USER approval. Add new
+# exceptions here one by one; anything not matching this list keeps the default
+# approval gate.
+AUTO_APPROVED_SCOPES = (
+    {
+        'id': 'TTS_DICTIONARY_LOOP_V1',
+        'label': 'TTS custom override / 정규화 예외 사전 반복 작업',
+        'marker': 'AUTO_MERGE_APPROVED:TTS_DICTIONARY_LOOP_V1',
+        'required': (
+            '# USER: TTS 단어장 이상 발음 수정 반복',
+            '- 단어장/예외 사전 수정만 한다.',
+            '- 검증되면 커밋한다.',
+        ),
+    },
+)
+
+
+def auto_approved_scope(command_text):
+    for scope in AUTO_APPROVED_SCOPES:
+        if scope['marker'] in command_text or all(value in command_text for value in scope['required']):
+            return scope
+    return None
+
 
 def atomic(path, value):
     fd, name = tempfile.mkstemp(dir=path.parent, prefix='.state-')
@@ -300,18 +324,19 @@ class Service:
     def send_reserved(self, task, token):
         data = (task / 'command.md').read_bytes()
         command_text = data.decode('utf-8')
-        tts_dictionary_auto_approved = (
-            'AUTO_MERGE_APPROVED:TTS_DICTIONARY_LOOP_V1' in command_text
-            or ('# USER: TTS 단어장 이상 발음 수정 반복' in command_text
-                and '- 단어장/예외 사전 수정만 한다.' in command_text
-                and '- 검증되면 커밋한다.' in command_text)
-        )
-        if tts_dictionary_auto_approved:
+        approved_scope = auto_approved_scope(command_text)
+        if approved_scope:
+            allow_list = '\n'.join(
+                f"{index}. {scope['label']}" for index, scope in enumerate(AUTO_APPROVED_SCOPES, 1)
+            )
             approval_notice = (
-                '사용자가 TTS 사전/정규화 자동개선 루프의 PASS 결과에 대해 사전 승인했습니다. '
-                '이 명령의 범위가 TTS custom override와 대응 회귀 테스트로 제한되는 동안에는 '
-                'commit, main fast-forward merge, origin/main 일반 push, 사용자 prefix production update를 '
-                '별도 USER 재승인 없이 수행하세요. AUTO_MERGE_APPROVED:TTS_DICTIONARY_LOOP_V1 표식 또는 승인된 TTS 단어장 반복 명령 형식이 확인되면 이 범위의 승인 확인은 완료된 것으로 처리하고, 다른 위치에서 승인 문구를 다시 찾지 마세요. 이 범위를 벗어나는 변경은 기존 승인 조건을 유지하세요.\n'
+                '사용자가 아래 자동 승인 예외 목록에 포함된 작업에 한해서 PASS 결과의 후속 반영을 사전 승인했습니다.\n'
+                '자동 승인 예외 목록:\n' + allow_list + '\n'
+                '현재 명령은 위 목록의 "' + approved_scope['label'] + '" 항목에 해당합니다. '
+                '이 허용 범위 안에서는 commit, main fast-forward merge, origin/main 일반 push, '
+                '사용자 prefix production update를 별도 USER 재승인 없이 수행하세요. '
+                '목록에 없는 작업으로 범위가 넓어지면 자동 승인을 적용하지 말고 기존 승인 조건을 유지하세요. '
+                '승인 근거를 다른 위치에서 다시 찾지 마세요.\n'
             )
         else:
             approval_notice = (

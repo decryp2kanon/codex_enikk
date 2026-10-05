@@ -71,7 +71,9 @@ class TriggerProtocolTests(unittest.TestCase):
         self.assertEqual(result['status'], 'ACCEPTED')
         message = self.service.observer.calls[0][1]['input'][0]['text']
         self.assertIn('별도 USER 재승인 없이 수행하세요', message)
-        self.assertIn('승인된 TTS 단어장 반복 명령 형식', message)
+        self.assertIn('자동 승인 예외 목록', message)
+        self.assertIn('1. TTS custom override / 정규화 예외 사전 반복 작업', message)
+        self.assertIn('현재 명령은 위 목록의 "TTS custom override / 정규화 예외 사전 반복 작업" 항목에 해당합니다.', message)
         self.assertNotIn('merge에는 USER 승인을 받으세요', message)
 
     def test_invalid_eof(self):
