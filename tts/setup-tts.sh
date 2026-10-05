@@ -56,4 +56,8 @@ assert waveform.numel() and rate > 0, "empty or invalid reference WAV"
 print(f"Chatterbox 0.1.7 ready; reference={sys.argv[1]}; device={'cuda' if torch.cuda.is_available() else 'cpu'}")
 PY
 
-run_user bash "$(dirname -- "${BASH_SOURCE[0]}")/setup-nemo-tn.sh"
+if [[ "${CODEX_ENIKK_TTS_UPSTREAM:-1}" != 0 ]]; then
+    run_user bash "$(dirname -- "${BASH_SOURCE[0]}")/setup-nemo-tn.sh"
+else
+    printf '%s\n' 'NeMo upstream disabled; keeping TTS setup custom-only.'
+fi

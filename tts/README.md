@@ -195,8 +195,13 @@ national standard or a guarantee of correct readings for every input.
 `setup-nemo-tn.sh` prepares a separate CPU environment at
 `~/Apps/enikk-nemo-tn`, builds the FAR cache once, and leaves the Chatterbox venv
 unchanged. `CODEX_ENIKK_TN_HOME` can select an alternate prepared environment.
-A persistent private helper initializes once per worker and handles subsequent
-requests without downloads or per-sentence process/model initialization.
+A persistent private NeMo adapter initializes once per worker and handles
+subsequent requests without downloads or per-sentence process/model
+initialization. Set `CODEX_ENIKK_TTS_UPSTREAM=0` to disable NeMo and every other
+upstream normalizer together; TTS setup then skips NeMo environment preparation
+and normalization uses only Yuki custom exceptions. That mode does not import
+NeMo or the selected 9-token dictionary, and works if the NeMo adapter and
+helper path are absent. The default `1` preserves the enabled path.
 Readiness, writes and replies have bounded deadlines; failures are explicit,
 with no fallback to the old pronunciation tables. Codex remains usable if TTS
 initialization fails.
@@ -258,14 +263,20 @@ models, references or the dedicated CPU environment.
 
 ### NeMo adapter, optional upstream dictionary, and Yuki overrides
 
-`yuki-text-normalization.py` owns the persistent CPU protocol and the public
-`nemo_text_processing.text_normalization.normalize.Normalizer` construction.
-It has one explicit call into the optional, removable `tts/upstream/` dictionary
-before delegating to `yuki-text-normalization-overrides.py` and NeMo. The
-dictionary is separate from Yuki's custom exceptions and does not modify NVIDIA
-package files. Set `CODEX_ENIKK_TTS_UPSTREAM=0` to bypass it; if its runtime
-module is missing, input passes through to the existing custom + NeMo path.
-Update the pinned NeMo environment independently of both local layers.
+`yuki-text-normalization.py` delegates once to `tts/upstream/orchestrator.py`.
+That boundary checks `CODEX_ENIKK_TTS_UPSTREAM` before importing either source.
+When enabled, the existing sequence is preserved: selected 9-token dictionary,
+Yuki protection/custom fixes, NeMo TN, checked restoration. The isolated
+`nemo_adapter.py` owns the persistent CPU protocol and public NeMo Normalizer.
+When disabled, the dictionary and NeMo source are both bypassed, no NeMo child
+starts, and the custom exception layer uses an identity callback.
+
+NeMo-specific code is confined to `tts/upstream/nemo_adapter.py`,
+`setup-nemo-tn.sh`, its conditional setup call, and NeMo-only tests/docs.
+Removing those source-specific files and install-list entries leaves the custom
+module, orchestrator, and TTS engine unchanged; run with the global switch set
+to `0` for custom-only operation. Updating the pinned NeMo environment remains
+independent of both local layers.
 
 The engine calls `normalize_paths` through the override module once, preserving
 original text and replacement/span accounting. Then names and narrow protection

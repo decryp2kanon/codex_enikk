@@ -8,7 +8,7 @@ if [[ ! -x "$tn_home/.venv/bin/python" ]]; then
 fi
 "$tn_home/.venv/bin/python" -m pip install --upgrade 'pip>=24,<27' 'wheel'
 "$tn_home/.venv/bin/python" -m pip install 'nemo_text_processing==1.2.0' 'pynini==2.1.6.post1'
-"$tn_home/.venv/bin/python" - "$(dirname -- "${BASH_SOURCE[0]}")/yuki-text-normalization.py" <<'PY'
+CODEX_ENIKK_TTS_UPSTREAM=1 "$tn_home/.venv/bin/python" - "$(dirname -- "${BASH_SOURCE[0]}")/yuki-text-normalization.py" <<'PY'
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location('yuki_tn', sys.argv[1])
 m = importlib.util.module_from_spec(spec)

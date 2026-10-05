@@ -2,6 +2,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -10,6 +11,14 @@ SOURCE = Path(__file__).resolve().parents[1] / 'tts/yuki-text-normalization.py'
 spec = importlib.util.spec_from_file_location('tn_test', SOURCE)
 tn = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(tn)
+
+
+def load_nemo_adapter():
+    path = SOURCE.parent / 'upstream/nemo_adapter.py'
+    adapter_spec = importlib.util.spec_from_file_location('nemo_adapter_unit_test', path)
+    module = importlib.util.module_from_spec(adapter_spec)
+    adapter_spec.loader.exec_module(module)
+    return module
 
 
 class NormalizationTests(unittest.TestCase):
@@ -25,7 +34,7 @@ class NormalizationTests(unittest.TestCase):
             self.assertIsNone(c.process)
 
     def test_failed_child_never_claims_ready(self):
-        c = tn.Client()
+        c = load_nemo_adapter().Client()
         c.process = Mock()
         c.process.poll.return_value = 1
         with self.assertRaisesRegex(RuntimeError, 'died'):
@@ -33,18 +42,60 @@ class NormalizationTests(unittest.TestCase):
         c.process = None
 
     def test_timeout_is_bounded(self):
-        c = tn.Client()
+        adapter = load_nemo_adapter()
+        c = adapter.Client()
         c.process = Mock()
-        with patch.object(tn.select, 'select', return_value=([], [], [])):
+        with patch.object(adapter.select, 'select', return_value=([], [], [])):
             with self.assertRaises(TimeoutError):
                 c._receive(0.01)
         c.process = None
 
     def test_protocol_error_is_explicit(self):
-        c = tn.Client()
+        c = load_nemo_adapter().Client()
         c.buffer = b'{"error":"bad input"}\n'
         with self.assertRaisesRegex(RuntimeError, 'bad input'):
             c._receive(1)
+
+    def test_global_upstream_zero_is_custom_only_and_does_not_load_sources(self):
+        with tempfile.TemporaryDirectory() as missing:
+            service = tn.Client(tn.overrides, upstream_dir=missing)
+            with patch.dict(os.environ, {'CODEX_ENIKK_TTS_UPSTREAM': '0',
+                                         'CODEX_ENIKK_TN_HOME': str(Path(missing) / 'no-nemo-home')}), \
+                    patch.object(tn._orchestrator, '_load_source',
+                                 side_effect=AssertionError('upstream source was loaded')), \
+                    patch.object(subprocess, 'Popen') as popen:
+                service.initialize()
+                self.assertEqual(service.normalize('AI CEO and Yuki CPU'),
+                                 'AI CEO and 유키 씨피유')
+                self.assertEqual(service.normalize('plain text passes through.'), 'plain text passes through.')
+                self.assertIsNone(service.process)
+                popen.assert_not_called()
+            service.close()
+
+    def test_removed_nemo_files_do_not_break_public_custom_only_api(self):
+        with tempfile.TemporaryDirectory() as missing, \
+                patch.dict(os.environ, {'CODEX_ENIKK_TTS_UPSTREAM': '0',
+                                        'CODEX_ENIKK_TN_HOME': str(Path(missing) / 'no-nemo-home')}), \
+                patch.object(tn._orchestrator, '_load_source',
+                             side_effect=AssertionError('NeMo/dictionary path was touched')), \
+                patch.object(subprocess, 'Popen') as popen:
+            tn.initialize()
+            self.assertEqual(tn.normalize('Yuki CPU and AI'), '유키 씨피유 and AI')
+            self.assertIsNone(tn._service.process)
+            popen.assert_not_called()
+
+    def test_enabled_order_keeps_dictionary_custom_and_nemo_layers_separate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'selected_korean_dictionary.py').write_text(
+                "def apply(text): return text.replace('AI', '에이아이')\n")
+            (root / 'nemo_adapter.py').write_text(
+                'def initialize(): pass\ndef normalize(text): return text\ndef close(): pass\n')
+            service = tn.Client(tn.overrides, upstream_dir=root)
+            with patch.dict(os.environ, {'CODEX_ENIKK_TTS_UPSTREAM': '1'}):
+                service.initialize()
+                self.assertEqual(service.normalize('AI Yuki'), '에이아이 유키')
+            service.close()
 
     def test_core_environment_not_used(self):
         text = SOURCE.read_text()
@@ -63,12 +114,15 @@ class NormalizationTests(unittest.TestCase):
 class InstalledGrammarTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.upstream_env = patch.dict(os.environ, {'CODEX_ENIKK_TTS_UPSTREAM': '1'})
+        cls.upstream_env.start()
         cls.client = tn.Client()
         cls.client.initialize()
 
     @classmethod
     def tearDownClass(cls):
         cls.client.close()
+        cls.upstream_env.stop()
 
     def test_actual_public_rules(self):
         for text, expected in {'-5': '마이너스 오', 'Python 3.10': '파이썬 삼점일영',
@@ -348,12 +402,15 @@ class KnownErrorIntegrationTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        cls.upstream_env = patch.dict(os.environ, {'CODEX_ENIKK_TTS_UPSTREAM': '1'})
+        cls.upstream_env.start()
         cls.client = tn.Client()
         cls.client.initialize()
 
     @classmethod
     def tearDownClass(cls):
         cls.client.close()
+        cls.upstream_env.stop()
 
     def test_general_korean_exactly_preserved(self):
         for text in ['일반 한국어 문장입니다. 일반적인 대화를 확인합니다.',
@@ -432,7 +489,12 @@ class LayerSeparationTests(unittest.TestCase):
         self.assertIsInstance(imports[0], ast.Import)
         self.assertEqual([alias.name for alias in imports[0].names], ['re'])
         wrapper = SOURCE.read_text()
-        self.assertIn('from nemo_text_processing.text_normalization.normalize import Normalizer', wrapper)
+        orchestrator = (SOURCE.parent / 'upstream/orchestrator.py').read_text()
+        adapter = (SOURCE.parent / 'upstream/nemo_adapter.py').read_text()
+        self.assertNotIn('nemo_text_processing', wrapper)
+        self.assertNotIn('nemo_text_processing', orchestrator)
+        self.assertIn('from nemo_text_processing.text_normalization.normalize import Normalizer', adapter)
+        self.assertIn("os.environ.get('CODEX_ENIKK_TTS_UPSTREAM', '1') != '0'", orchestrator)
         self.assertNotIn('HEARD_ERRORS =', wrapper)
         self.assertNotIn('KNOWN_UNITS =', wrapper)
 
@@ -441,7 +503,16 @@ class LayerSeparationTests(unittest.TestCase):
             script = (SOURCE.parents[1] / name).read_text()
             self.assertIn('yuki-text-normalization-overrides.py', script)
             self.assertIn('selected_korean_dictionary.py', script)
+            self.assertIn('orchestrator.py', script)
+            self.assertIn('nemo_adapter.py', script)
             self.assertIn('manifest.json', script)
+
+    def test_custom_only_setup_skips_nemo_preparation(self):
+        setup = (SOURCE.parent / 'setup-tts.sh').read_text()
+        self.assertIn('CODEX_ENIKK_TTS_UPSTREAM:-1', setup)
+        self.assertIn('NeMo upstream disabled; keeping TTS setup custom-only.', setup)
+        nemo_setup = (SOURCE.parent / 'setup-nemo-tn.sh').read_text()
+        self.assertIn('CODEX_ENIKK_TTS_UPSTREAM=1', nemo_setup)
 
 
 class SingleHourDurationTests(unittest.TestCase):

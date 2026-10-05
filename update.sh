@@ -75,7 +75,7 @@ done
 mkdir -- "$tts_temporary/assets"
 mkdir -- "$tts_temporary/upstream"
 install -m 644 -- "$source_dir/tts/assets/yuki_super-clean.wav" "$tts_temporary/assets/yuki_super-clean.wav"
-for file in README.md manifest.json selected_korean_dictionary.py LICENSE-MELO.txt; do
+for file in README.md manifest.json selected_korean_dictionary.py orchestrator.py nemo_adapter.py LICENSE-MELO.txt; do
     install -m 644 -- "$source_dir/tts/upstream/$file" "$tts_temporary/upstream/$file"
 done
 chmod 755 "$tts_temporary/setup-tts.sh"

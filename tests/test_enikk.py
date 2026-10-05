@@ -682,7 +682,8 @@ while True: time.sleep(1)
                 self.assertEqual(compat_help.returncode, 0, compat_help.stderr)
                 self.assertEqual((prefix / 'lib/codex_enikk/tts/yuki-codex-stream.py').read_bytes(), (ROOT / 'tts/yuki-codex-stream.py').read_bytes())
                 self.assertEqual((prefix / 'lib/codex_enikk/tts/yuki-chatterbox-engine.py').read_bytes(), (ROOT / 'tts/yuki-chatterbox-engine.py').read_bytes())
-                for name in ('README.md', 'manifest.json', 'selected_korean_dictionary.py', 'LICENSE-MELO.txt'):
+                for name in ('README.md', 'manifest.json', 'selected_korean_dictionary.py',
+                             'orchestrator.py', 'nemo_adapter.py', 'LICENSE-MELO.txt'):
                     self.assertEqual((prefix / 'lib/codex_enikk/tts/upstream' / name).read_bytes(),
                                      (ROOT / 'tts/upstream' / name).read_bytes())
                 for name in ('codex_enikk', 'codex_session_save.sh'):
@@ -737,7 +738,8 @@ while True: time.sleep(1)
         self.assertIn('atempo=1.25', audio)
         self.assertNotIn('/usr/bin/aplay', audio)
         self.assertEqual((lib / 'tts/assets/yuki_super-clean.wav').read_bytes(), (ROOT / 'tts/assets/yuki_super-clean.wav').read_bytes())
-        for name in ('README.md', 'manifest.json', 'selected_korean_dictionary.py', 'LICENSE-MELO.txt'):
+        for name in ('README.md', 'manifest.json', 'selected_korean_dictionary.py',
+                     'orchestrator.py', 'nemo_adapter.py', 'LICENSE-MELO.txt'):
             self.assertEqual((lib / 'tts/upstream' / name).read_bytes(),
                              (ROOT / 'tts/upstream' / name).read_bytes())
             self.assertEqual((previous[0] / 'tts/upstream' / name).read_bytes(),

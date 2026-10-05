@@ -48,18 +48,27 @@ class UpstreamDictionaryTests(unittest.TestCase):
         self.assertEqual(rules.apply('(AI), CEO! pc and ai'), '(에이아이), 씨이오! pc and ai')
 
     def test_disabled_layer_is_identity(self):
-        disabled = tn._load_upstream_normalizer(enabled=False)
-        self.assertEqual(disabled('AI CEO'), 'AI CEO')
+        disabled = tn._orchestrator.Service(tn.overrides, upstream_dir=ROOT / 'missing-upstreams')
+        with patch.dict(os.environ, {'CODEX_ENIKK_TTS_UPSTREAM': '0'}):
+            disabled.initialize()
+            self.assertEqual(disabled.normalize('AI CEO'), 'AI CEO')
+            self.assertIsNone(disabled.process)
+        disabled.close()
 
     def test_environment_switch_disables_layer(self):
         with patch.dict(os.environ, {'CODEX_ENIKK_TTS_UPSTREAM': '0'}):
-            disabled = tn._load_upstream_normalizer()
-        self.assertEqual(disabled('AI CEO'), 'AI CEO')
+            disabled = tn.Client()
+            self.assertEqual(disabled.normalize('AI CEO and Yuki'),
+                             'AI CEO and 유키')
+        disabled.close()
 
     def test_missing_module_is_identity(self):
         with tempfile.TemporaryDirectory() as temp:
-            missing = tn._load_upstream_normalizer(Path(temp) / 'missing.py', enabled=True)
-            self.assertEqual(missing('AI CEO'), 'AI CEO')
+            disabled = tn._orchestrator.Service(tn.overrides, upstream_dir=Path(temp))
+            with patch.dict(os.environ, {'CODEX_ENIKK_TTS_UPSTREAM': '0'}):
+                self.assertEqual(disabled.normalize('AI CEO'), 'AI CEO')
+                self.assertIsNone(disabled.process)
+            disabled.close()
 
     def test_manifest_has_all_stable_rule_ids(self):
         manifest = json.loads((ROOT / 'tts/upstream/manifest.json').read_text())
@@ -70,8 +79,11 @@ class UpstreamDictionaryTests(unittest.TestCase):
 
     def test_service_has_one_explicit_runtime_connection(self):
         source = WRAPPER.read_text()
-        self.assertEqual(source.count('_upstream_normalize(text)'), 1)
-        self.assertIn("CODEX_ENIKK_TTS_UPSTREAM", source)
+        orchestrator = (ROOT / 'tts/upstream/orchestrator.py').read_text()
+        self.assertEqual(source.count('_orchestrator.Service'), 1)
+        self.assertIn('_service = Client()', source)
+        self.assertIn('CODEX_ENIKK_TTS_UPSTREAM', orchestrator)
+        self.assertIn('self.custom.normalize_with_exceptions(text, nemo.normalize)', orchestrator)
 
 
 if __name__ == '__main__':
