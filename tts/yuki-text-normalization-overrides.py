@@ -19,9 +19,9 @@ def proper_names(text):
 # Reproduced NeMo errors and USER-confirmed unit readings. Case matters: GB != Gb.
 # Other numeric/SI rules, ordinary Korean and mathematical operators stay upstream.
 GROUPED_INTEGER = re.compile(r'(?<![A-Za-z0-9_.,])[1-9]\d{0,2}(?:,\d{3})+(?!\d|,\d)')
-# Reproduced 282개/284개/1,024개 were split into incorrect smaller counts.
-# Use public standalone cardinal TN for large item counts, not custom digits.
-LARGE_ITEM_COUNT = re.compile(r'(?<![\w.,+/@-])([1-9]\d{2,})개(?![A-Za-z0-9_./])')
+# Reproduced 46개/61개/282개/284개/1,024개 were split into smaller counts.
+# Keep correct native readings for other two-digit counts; use public cardinal TN.
+LARGE_ITEM_COUNT = re.compile(r'(?<![\w.,+/@-])(46|61|[1-9]\d{2,})개(?![A-Za-z0-9_./])')
 KNOWN_UNITS = {'GB': '기가바이트', 'MB': '메가바이트', 'TB': '테라바이트',
                'kHz': '킬로헤르츠', 'kbps': '킬로비트 퍼 초', 'km/h': '킬로미터 퍼 아워'}
 NUMBER_UNIT = re.compile(r'(?<![A-Za-z0-9_.,+-])(?P<number>-?\d+(?:\.\d+)?)'
