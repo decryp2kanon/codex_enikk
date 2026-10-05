@@ -124,6 +124,14 @@ class WorkerNormalizationFailureTests(unittest.TestCase):
                 ready.put(None)
 
 class ExceptionBoundaryTests(unittest.TestCase):
+    def test_su_isseo_protection_has_narrow_boundaries(self):
+        pattern = tn.overrides.SU_ISSEO_PHRASE
+        for text in ['설치할 수 있으므로 중단한다.', '변경이 섞일 수 있어.']:
+            self.assertIsNotNone(pattern.search(text), text)
+        for text in ['수요일 있어', '가수 있어', '수 있어서', '수 있어요',
+                     '수 있어.txt', '/수 있어', '@수 있으므로', '수 있음']:
+            self.assertIsNone(pattern.search(text), text)
+
     def test_branch_reading_only_changes_prose_token(self):
         self.assertEqual(tn.overrides.heard_error_readings('현재 branch 상태와 branch는'),
                          '현재 브랜치 상태와 브랜치는')
@@ -211,12 +219,17 @@ class ExceptionBoundaryTests(unittest.TestCase):
 
 @unittest.skipUnless((Path.home() / 'Apps/enikk-nemo-tn/.venv/bin/python').is_file(), 'isolated NeMo unavailable')
 class KnownErrorIntegrationTests(unittest.TestCase):
+    def test_confirmed_ability_phrases_are_not_weekdays(self):
+        for text in ['변경까지 설치할 수 있으므로 중단할게.', '변경이 섞일 수 있어.']:
+            self.assertEqual(self.client.normalize(text), text)
+
     def test_branch_prose_reading(self):
         self.assertEqual(self.client.normalize('현재 branch 상태를 확인할게.'),
                          '현재 브랜치 상태를 확인할게.')
 
     def test_large_item_counts_keep_numeric_value(self):
         for text, expected in [('46개', '사십육 개'),
+                               ('48개', '사십팔 개'),
                                ('61개', '육십일 개'),
                                ('28개', '스물여덟개'),
                                ('17개', '열일곱개'),
