@@ -59,6 +59,18 @@ SU_ISSEO_PHRASE = re.compile(r'(?<![\w/@-])수 (?:있으므로|있어)(?!\w|\.[A
 AUDITED_NOUN_PHRASE = re.compile(
     r'(?<![\w/@-])(?:수 (?:있습니다|없어요|없어서|있는|있다)|일 하나를)'
     r'(?!\w|\.[A-Za-z0-9_])')
+# Round-27 fixtures: inflected ability, throat/gold/work/day-count contexts.
+# Protect complete confirmed spans; never replace bare weekday initials globally.
+WEEKDAY_COLLISION_PHRASE = re.compile(
+    r'(?<![\w/@-])(?:수 (?:없다|없으면|있어서|있어도|없지만|없습니다)'
+    r'(?!\w|\.[A-Za-z0-9_])'
+    r'|(?:목 (?:건강|안쪽)|금 (?:가격|한 돈)|일 (?:처리|하나|두 개)'
+    r'|일수 계산|이번 월 말|분노의 화 관리|흙의 토 (?:분류|색상))'
+    r'(?=$|[\s!?,]|\.(?![A-Za-z0-9_])|(?:에서|으로|부터|은|는|이|가|을|를|에|의|도)'
+    r'(?=$|[\s!?,]|\.(?![A-Za-z0-9_]))))')
+WEEKDAY_INITIAL_FILENAME = re.compile(
+    r'(?<!\S)(?:월\.py|화\.txt|수\.md|목\.json|금\.wav|토\.sh|일\.log)'
+    r'(?=$|\s|[,!?;]|\.(?=\s|$))')
 
 
 # Explicit USER listening failures only; not a general English or letter dictionary.
@@ -109,6 +121,8 @@ def normalize_with_exceptions(text, normalize):
     text = SU_EOPSEO_PHRASE.sub(lambda match: protect(match.group()), text)
     text = SU_ISSEO_PHRASE.sub(lambda match: protect(match.group()), text)
     text = AUDITED_NOUN_PHRASE.sub(lambda match: protect(match.group()), text)
+    text = WEEKDAY_INITIAL_FILENAME.sub(lambda match: protect(match.group()), text)
+    text = WEEKDAY_COLLISION_PHRASE.sub(lambda match: protect(match.group()), text)
     text = SINGLE_HOUR.sub(lambda match: protect('한 시간'), text)
     text = KNOWN_PROTECTED.sub(lambda match: protect(match.group()), text)
     # Strip commas only from syntactically valid thousands groups, not prose commas.

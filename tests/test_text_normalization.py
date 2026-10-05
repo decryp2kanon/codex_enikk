@@ -124,6 +124,22 @@ class WorkerNormalizationFailureTests(unittest.TestCase):
                 ready.put(None)
 
 class ExceptionBoundaryTests(unittest.TestCase):
+    def test_weekday_collision_contexts_have_bounded_endings(self):
+        pattern = tn.overrides.WEEKDAY_COLLISION_PHRASE
+        for text in ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일',
+                     '가수 없으면', '수 없었다', '수 없다는', '목 건강보험',
+                     '금 가격표', '일 처리기', '일 하나둘', '일수 계산기',
+                     '/목 건강', '목 건강.txt', '@금 가격', '수 없다.py']:
+            self.assertIsNone(pattern.search(text), text)
+
+    def test_weekday_filename_protection_only_covers_standalone_names(self):
+        pattern = tn.overrides.WEEKDAY_INITIAL_FILENAME
+        for name in ['월.py', '화.txt', '수.md', '목.json', '금.wav', '토.sh', '일.log']:
+            self.assertIsNotNone(pattern.fullmatch(name), name)
+            for text in ['prefix_'+name, '/tmp/'+name, name+'@example.com',
+                         'https://example.com/'+name, name+'.backup']:
+                self.assertIsNone(pattern.search(text), text)
+
     def test_audited_nouns_exclude_weekdays_and_identifiers(self):
         pattern = tn.overrides.AUDITED_NOUN_PHRASE
         for text in ['수요일 있습니다', '일요일 하나', '가수 있습니다',
@@ -226,6 +242,23 @@ class ExceptionBoundaryTests(unittest.TestCase):
 
 @unittest.skipUnless((Path.home() / 'Apps/enikk-nemo-tn/.venv/bin/python').is_file(), 'isolated NeMo unavailable')
 class KnownErrorIntegrationTests(unittest.TestCase):
+    def test_weekday_collision_audit_preserves_confirmed_meanings(self):
+        for text in ['실행할 수 없다.', '실행할 수 없으면 중단합니다.',
+                     '실행할 수 있어서 진행합니다.', '실행할 수 있어도 대기합니다.',
+                     '실행할 수 없지만 기록합니다.', '수 없습니다.',
+                     '목 건강을 확인합니다.', '목 안쪽이 아픕니다.',
+                     '금 가격을 확인합니다.', '금 한 돈을 샀습니다.',
+                     '일 처리를 확인합니다.', '이 일 하나부터 끝냅니다.',
+                     '이 일 두 개를 끝냅니다.', '일수 계산을 확인합니다.',
+                     '이번 월 말에 만납니다.', '분노의 화 관리를 확인합니다.',
+                     '흙의 토 분류를 확인합니다.', '흙의 토 색상을 확인합니다.',
+                     '월.py 화.txt 수.md 목.json 금.wav 토.sh 일.log']:
+            with self.subTest(text=text):
+                self.assertEqual(self.client.normalize(text), text)
+        for weekday in ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']:
+            text = weekday + ' 오전에 시작합니다.'
+            self.assertEqual(self.client.normalize(text), text)
+
     def test_audited_nouns_do_not_become_weekdays(self):
         for text in ['확인할 수 있습니다.', '확인할 수 없어요.',
                      '확인할 수 없어서 중단합니다.', '확인할 수 있는 상태입니다.',
