@@ -10,10 +10,10 @@ import sys
 from trigger_transport import peer_uid
 
 EXIT = {'ACCEPTED': 0, 'BUSY': 2, 'DUPLICATE': 3, 'INVALID_EOF': 4,
-        'NO_RUNNING_ENIKK': 5, 'INVALID_PATH': 6, 'SECURITY_ERROR': 7, 'UNKNOWN_EFFECT': 8}
+        'QUEUED': 0, 'QUEUE_FULL': 2, 'CANCELLED': 0, 'NOT_FOUND': 9, 'NO_RUNNING_ENIKK': 5, 'INVALID_PATH': 6, 'SECURITY_ERROR': 7, 'UNKNOWN_EFFECT': 8}
 
 
-def submit(endpoint, fixture=False):
+def submit(endpoint, fixture=False, cancel=None):
     sock = socket.socket(socket.AF_UNIX); sock.settimeout(20)
     sent = False
     try:
@@ -25,7 +25,8 @@ def submit(endpoint, fixture=False):
         sock.connect(str(endpoint))
         if peer_uid(sock) != os.getuid(): return {'status': 'SECURITY_ERROR'}
         sent = True  # a failed send may still have had an effect
-        sock.sendall(json.dumps({'action': 'fixture' if fixture else 'trigger'}).encode() + b'\n')
+        request = {'action': 'cancel', 'task_id': cancel} if cancel is not None else {'action': 'fixture' if fixture else 'trigger'}
+        sock.sendall(json.dumps(request).encode() + b'\n')
         raw = bytearray()
         while not raw.endswith(b'\n'):
             part = sock.recv(1)
@@ -46,12 +47,13 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('path', nargs='?')
     parser.add_argument('--fixture', action='store_true', help='only the built-in harmless status command; never reads the real inbox')
+    parser.add_argument('--cancel', metavar='TASK_ID', help='cancel a queued command; never interrupts active work')
     args = parser.parse_args(argv)
     trusted = Path.home() / 'dorothy-command.md'
-    if args.path is not None and (args.fixture or args.path != str(trusted)):
+    if (args.cancel and (args.path or args.fixture)) or (args.path is not None and (args.fixture or args.path != str(trusted))):
         result = {'status': 'INVALID_PATH'}
     else:
-        result = submit(Path.home() / '.local/state/codex_enikk/trigger/trigger.sock', args.fixture)
+        result = submit(Path.home() / '.local/state/codex_enikk/trigger/trigger.sock', args.fixture, cancel=args.cancel) if args.cancel else submit(Path.home() / '.local/state/codex_enikk/trigger/trigger.sock', args.fixture)
     print(json.dumps(result, ensure_ascii=False))
     return EXIT[result['status']]
 
