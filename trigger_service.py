@@ -196,6 +196,16 @@ class Service:
                     atomic(path, state)
                     self.current_task = None
 
+    def transport_lost(self, session):
+        """Only loss of authoritative observation or an unresolved send is global."""
+        with self.guard:
+            if self.stopped.is_set():
+                return
+            if session is self.observer or (
+                    session is not None and self.arbiter.token is not None and
+                    self.arbiter.token in session.pending.values()):
+                self.arbiter.lost()
+
     def trigger(self, request, uid):
         if uid != os.getuid(): return {'status': 'SECURITY_ERROR'}
         if request not in ({'action': 'trigger'}, {'action': 'fixture'}):
@@ -283,7 +293,7 @@ class Session:
                     self.waiters[key][1] = event; self.waiters[key][0].set()
                 if self.downstream: self.downstream.send(raw)
         except Exception:
-            self.service.arbiter.lost()
+            self.service.transport_lost(self)
         finally:
             self.alive = False
             for waiter in list(self.waiters.values()): waiter[0].set()
@@ -332,7 +342,7 @@ def native_client(service, sock):
                 continue
             session.send(event)
     except Exception:
-        service.arbiter.lost()
+        service.transport_lost(session)
     finally:
         if session: session.close()
         elif downstream: downstream.close()

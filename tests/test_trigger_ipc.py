@@ -193,6 +193,59 @@ class IpcTests(unittest.TestCase):
             restarted.stopped.set()
             for session in list(restarted.sessions): session.close()
 
+    def temporary_client(self):
+        client = connect(self.root / 'proxy.sock'); client.settimeout(3)
+        client.send(json.dumps({'id': 101, 'method': 'initialize', 'params': {}}))
+        while json.loads(client.recv()).get('id') != 101:
+            pass
+        return client
+
+    def test_temporary_disconnect_preserves_idle_and_next_submission(self):
+        client = self.temporary_client()
+        natives = [s for s in self.service.sessions if s is not self.service.observer]
+        client.close()
+        eventually(lambda: any(not s.alive for s in natives))
+        self.assertEqual(self.service.arbiter.state, 'IDLE')
+        self.native_submit(); self.assertIn('result', self.response(3))
+
+    def test_interrupt_then_temporary_disconnect_allows_new_delegate(self):
+        first = submit(self.root / 'trigger.sock')
+        self.assertEqual(first['status'], 'ACCEPTED')
+        client = self.temporary_client()
+        natives = [s for s in self.service.sessions if s is not self.service.observer]
+        client.send(json.dumps({'id': 102, 'method': 'turn/interrupt',
+                                'params': {'threadId': 'thread', 'turnId': self.server.active}}))
+        while json.loads(client.recv()).get('id') != 102:
+            pass
+        eventually(lambda: self.service.arbiter.state == 'IDLE')
+        client.close()
+        eventually(lambda: any(not s.alive for s in natives))
+        self.inbox.write_text('second command\n\nEOF\n')
+        self.assertEqual(submit(self.root / 'trigger.sock')['status'], 'ACCEPTED')
+        self.assertEqual(self.server.count, 2)
+        self.assertEqual(self.server.steered, 0)
+
+    def test_idle_client_disconnect_does_not_poison_active_delegate(self):
+        self.assertEqual(submit(self.root / 'trigger.sock')['status'], 'ACCEPTED')
+        client = self.temporary_client()
+        natives = [s for s in self.service.sessions if s is not self.service.observer]
+        client.close()
+        eventually(lambda: any(not s.alive for s in natives))
+        self.assertEqual(self.service.arbiter.state, 'DOROTHY_ACTIVE')
+        self.inbox.write_text('new command\n\nEOF\n')
+        self.assertEqual(submit(self.root / 'trigger.sock')['status'], 'BUSY')
+        self.server.complete()
+        eventually(lambda: self.service.arbiter.state == 'IDLE')
+        self.assertEqual(submit(self.root / 'trigger.sock')['status'], 'ACCEPTED')
+
+    def test_unresolved_native_send_disconnect_remains_unknown(self):
+        from unittest.mock import Mock
+        session = Mock(); session.pending = {}
+        self.service.native_request(session, {'id': 55, 'method': 'turn/start',
+                                             'params': {'threadId': 'thread'}})
+        self.service.transport_lost(session)
+        self.assertEqual(self.service.arbiter.state, 'UNKNOWN')
+
     def test_disconnect_fails_closed(self):
         self.server.close()
         eventually(lambda: self.service.arbiter.state == 'UNKNOWN')
