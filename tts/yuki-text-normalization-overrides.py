@@ -34,7 +34,9 @@ KNOWN_PROTECTED = re.compile(
 # Reproduced in runtime log: "1시간 제한" -> "일 시간 제한".
 # Native numeral for this one-hour duration only; exclude decimals, signs,
 # identifiers and ordinal 제1시간 rather than overriding general number grammar.
-SINGLE_HOUR = re.compile(r'(?<![\w.,+~\-/@:])1시간(?![\w./])')
+# Runtime reproduction also includes attached 에만; do not match 에만큼.
+SINGLE_HOUR = re.compile(r'(?<![\w.,+~\-/@:])1시간'
+                         r'(?:(?![\w./])|(?=에만(?=\s|[!?,]|$|\.(?=\s|$))))')
 
 
 # Explicit USER listening failures only; not a general English or letter dictionary.

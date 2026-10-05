@@ -174,6 +174,10 @@ class ExceptionBoundaryTests(unittest.TestCase):
 
 @unittest.skipUnless((Path.home() / 'Apps/enikk-nemo-tn/.venv/bin/python').is_file(), 'isolated NeMo unavailable')
 class KnownErrorIntegrationTests(unittest.TestCase):
+    def test_single_hour_attached_eman_uses_native_numeral(self):
+        self.assertEqual(self.client.normalize('1시간에만 집중하겠습니다.'),
+                         '한 시간에만 집중하겠습니다.')
+
     def test_single_hour_duration_uses_native_numeral(self):
         self.assertEqual(self.client.normalize('1시간 제한'), '한 시간 제한')
         self.assertEqual(self.client.normalize('1시간 안에 확인합니다.'), '한 시간 안에 확인합니다.')
@@ -286,4 +290,15 @@ class SingleHourDurationTests(unittest.TestCase):
         for text in ['11시간', '31시간', '0.1시간', '1.1시간', '-1시간', '+1시간',
                      '0~1시간', 'test_1시간', '제1시간', '1시간.txt', '/tmp/1시간.wav',
                      '한 시간', '24시간', '12시 12분']:
+            self.assertIsNone(tn.overrides.SINGLE_HOUR.search(text), text)
+
+
+class SingleHourParticleBoundaryTests(unittest.TestCase):
+    def test_only_confirmed_eman_suffix(self):
+        for text in ['1시간에만 집중', '1시간에만.', '1시간에만']:
+            self.assertEqual(tn.overrides.normalize_with_exceptions(text, lambda t:t),
+                             text.replace('1시간', '한 시간'))
+        for text in ['11시간에만', '1.1시간에만', '-1시간에만', '+1시간에만',
+                     '제1시간에만', 'test_1시간에만', '1시간에만큼',
+                     '1시간에만.txt', '/tmp/1시간에만', '1시간에는']:
             self.assertIsNone(tn.overrides.SINGLE_HOUR.search(text), text)
