@@ -50,6 +50,7 @@ HELP = '''codex_enikk — 기존 대화를 원래 Codex 화면으로 이어가�
   codex_enikk --yolo          기본 동작과 동일 (호환 옵션)
   codex_enikk -i IMAGE        이미지 파일 첨부
   codex_enikk -m MODEL        시작 모델 지정
+  codex_enikk --tts-debug     별도 터미널 창에서 현재 TTS 로그 보기
   codex_enikk --help          도움말
   codex_enikk --version       버전
 
@@ -836,14 +837,37 @@ def terminal_restore():
             os.close(fd)
 
 
+def open_tts_debug_window(state):
+    """Read-only log viewer; it never starts another TTS worker."""
+    terminal = shutil.which('gnome-terminal')
+    if not terminal or not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')):
+        print('TTS debug 창을 열 수 없습니다: GUI 터미널이 필요합니다.', file=sys.stderr)
+        return
+    log = Path(state) / 'runtime.log'
+    log.touch(exist_ok=True)
+    events = Path(state) / 'notify.log'
+    events.touch(exist_ok=True)
+    try:
+        subprocess.Popen([terminal, '--window', '--title=Yuki TTS debug', '--',
+                          'tail', '-n', '80', '-F', '--pid=' + str(os.getpid()), str(log), str(events)],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, close_fds=True, start_new_session=True)
+    except OSError as exc:
+        print(f'TTS debug 창 시작 실패: {exc}', file=sys.stderr)
+
+
 def conversation(session_id, instance_fd, args=()):
     """Let the native TUI own the terminal, clipboard, slash commands and rendering."""
     yolo = '--dangerously-bypass-approvals-and-sandbox'
     options = []
+    tts_debug = False
     literal = False
     for arg in args:
         if arg == '--':
             literal = True
+        if not literal and arg == '--tts-debug':
+            tts_debug = True
+            continue
         if not literal and arg in ('--yolo', yolo, '--no-daemon'):
             continue  # Always enabled below; keep aliases idempotent.
         options.append(arg)
@@ -856,6 +880,8 @@ def conversation(session_id, instance_fd, args=()):
             codex_home() / 'thread_history_1.sqlite', session_id,
             Path.home() / 'codex-latest.txt',
             Path(os.environ['CODEX_ENIKK_TTS_STATE']) / 'mirror-thread.json'):
+        if tts_debug:
+            open_tts_debug_window(os.environ['CODEX_ENIKK_TTS_STATE'])
         install_root = Path(__file__).resolve().parent
         tts_script = install_root / 'tts' / 'yuki-codex-rollout-watch.py'
         chatterbox_python = Path(os.environ.get('CODEX_ENIKK_CHATTERBOX_HOME',
