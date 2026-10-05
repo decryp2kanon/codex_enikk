@@ -52,8 +52,11 @@
 
 ## 반영과 남은 확인
 
-- Code/test changes are limited to `tts/yuki-text-normalization-overrides.py` and `tests/test_text_normalization.py`; this report records Part-specific results.
-- `RESTART_REQUIRED=true`. No wrapper, TUI, worker, trigger service, or model was restarted by this task.
-- After approved integration and `PREFIX=/home/ak/.local CODEX_ENIKK_INSTALL_TTS=0 bash ./update.sh`, verify source/install hashes, then Dorothy should restart normally, check ready/UPSTREAM=0/NeMo=0, complete the ordered graduation read, and only then create `part02-production-verified`.
-- Rollback: revert the narrow `branch과` custom exception and its regression test if the post-restart graduation reveals an unwanted transformation; no runtime or model setting changed.
+- Code/test changes are limited to `tts/yuki-text-normalization-overrides.py` and `tests/test_text_normalization.py`.
+- Implementation commit: `6b909289ec9b40679d42bd6db878b5643b617764`; branch report commit merged with it: `53e66c602d29b929d5c5e9f399f0e8165e36df47`.
+- Main fast-forward and `origin/main` push succeeded at `53e66c602d29b929d5c5e9f399f0e8165e36df47`.
+- `PREFIX=/home/ak/.local CODEX_ENIKK_INSTALL_TTS=0 bash ./update.sh`: exit 0. Source/install SHA-256 matched for overrides (`0aac81ba2b0c47e27efad080020997fae7af7eef8f41a96e768fec55886fc72a`), normalization wrapper (`e4c8eb944a32261a242d51db6fb87285e519aed02199de6419b214eba0dbc835`), upstream orchestrator (`0072de5b23cfe2cdd01880479402df8fe13e0edf48002cac3833e4cfcd782844`), selected dictionary (`a6be2d6e1a36dda51ba7648528484dbf9c9534b2646589693e1dd019a72932fb`), and Chatterbox engine (`53fc54cac8d8f20fe7a1bd84656ada4e76d4acc1c618efa624723e3bcf4f053e`).
+- The pre-existing production worker PID `3304971` remained alive on run `run-_icdknfr`; its environment still showed `CODEX_ENIKK_TTS_UPSTREAM=0`. NeMo process count was 0. The worker was not restarted and therefore has not loaded the updated module in memory.
+- Status: `PARTIAL_PASS_RESTART_GRADUATION_PENDING`; `RESTART_REQUIRED=true`. Dorothy should restart normally, verify ready/UPSTREAM=0/NeMo=0, perform the one ordered graduation read using the installed candidate, verify 0 failed/missing/duplicate/out-of-order segments, and only then create `part02-production-verified`. No later Part may start before that marker exists.
+- Rollback: use a normal `git revert` of the implementation commit if the post-restart graduation reveals an unwanted transformation; no runtime or model setting changed.
 - Four primary-checkout benchmark reports remain untouched.
