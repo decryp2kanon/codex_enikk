@@ -329,6 +329,19 @@ class Service:
             allow_list = '\n'.join(
                 f"{index}. {scope['label']}" for index, scope in enumerate(AUTO_APPROVED_SCOPES, 1)
             )
+            deferred_notice = ''
+            if approved_scope['id'] == 'TTS_DICTIONARY_LOOP_V1':
+                deferred_path = Path(__file__).resolve().parent / 'tts' / 'DEFERRED-ISSUES.md'
+                if deferred_path.is_file():
+                    deferred_notice = (
+                        '\nYuki TTS Deferred Issues는 이미 조사 후 보류한 항목의 공식 스킵 목록입니다. '
+                        '이번 반복 감사에서는 ACTIVE 항목을 다시 조사하거나 수정하지 말고 신규 이슈를 우선하세요. '
+                        'USER가 명시적으로 재개하거나 새로운 검증 근거가 생긴 경우에만 다시 여세요. '
+                        '성능 저하가 baseline 대비 1.0%를 초과하는 후보는 자동 반영하지 말고 '
+                        '[PERFORMANCE>1%] 태그로 Deferred Issues에 기록하세요.\n'
+                        '===== Deferred Issues =====\n' + deferred_path.read_text(encoding='utf-8') +
+                        '===== Deferred Issues 끝 =====\n'
+                    )
             approval_notice = (
                 '사용자가 아래 자동 승인 예외 목록에 포함된 작업에 한해서 PASS 결과의 후속 반영을 사전 승인했습니다.\n'
                 '자동 승인 예외 목록:\n' + allow_list + '\n'
@@ -336,7 +349,7 @@ class Service:
                 '이 허용 범위 안에서는 commit, main fast-forward merge, origin/main 일반 push, '
                 '사용자 prefix production update를 별도 USER 재승인 없이 수행하세요. '
                 '목록에 없는 작업으로 범위가 넓어지면 자동 승인을 적용하지 말고 기존 승인 조건을 유지하세요. '
-                '승인 근거를 다른 위치에서 다시 찾지 마세요.\n'
+                '승인 근거를 다른 위치에서 다시 찾지 마세요.\n' + deferred_notice
             )
         else:
             approval_notice = (

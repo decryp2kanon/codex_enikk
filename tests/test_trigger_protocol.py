@@ -74,6 +74,11 @@ class TriggerProtocolTests(unittest.TestCase):
         self.assertIn('자동 승인 예외 목록', message)
         self.assertIn('1. TTS custom override / 정규화 예외 사전 반복 작업', message)
         self.assertIn('현재 명령은 위 목록의 "TTS custom override / 정규화 예외 사전 반복 작업" 항목에 해당합니다.', message)
+        self.assertIn('Yuki TTS Deferred Issues', message)
+        self.assertIn('[HUMAN_PRONUNCIATION] commit', message)
+        self.assertIn('[GENERATION_FAILURE] reference', message)
+        self.assertIn('[PERFORMANCE>1%]', message)
+        self.assertIn('baseline 대비 1.0%를 초과', message)
         self.assertNotIn('merge에는 USER 승인을 받으세요', message)
 
     def test_invalid_eof(self):
