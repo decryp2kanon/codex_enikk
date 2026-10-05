@@ -174,6 +174,10 @@ class ExceptionBoundaryTests(unittest.TestCase):
 
 @unittest.skipUnless((Path.home() / 'Apps/enikk-nemo-tn/.venv/bin/python').is_file(), 'isolated NeMo unavailable')
 class KnownErrorIntegrationTests(unittest.TestCase):
+    def test_single_hour_duration_uses_native_numeral(self):
+        self.assertEqual(self.client.normalize('1시간 제한'), '한 시간 제한')
+        self.assertEqual(self.client.normalize('1시간 안에 확인합니다.'), '한 시간 안에 확인합니다.')
+
     @classmethod
     def setUpClass(cls):
         cls.client = tn.Client()
@@ -268,3 +272,18 @@ class LayerSeparationTests(unittest.TestCase):
         for name in ['install.sh', 'update.sh']:
             self.assertIn('yuki-text-normalization-overrides.py',
                           (SOURCE.parents[1] / name).read_text())
+
+
+class SingleHourDurationTests(unittest.TestCase):
+    def test_duration_is_protected_before_public_tn(self):
+        public = Mock(side_effect=lambda text: text)
+        self.assertEqual(tn.overrides.normalize_with_exceptions('1시간 제한, 1시간 안에 확인', public),
+                         '한 시간 제한, 한 시간 안에 확인')
+        public.assert_called_once()
+        self.assertNotIn('1시간', public.call_args.args[0])
+
+    def test_no_other_values_identifiers_ordinals_or_paths(self):
+        for text in ['11시간', '31시간', '0.1시간', '1.1시간', '-1시간', '+1시간',
+                     '0~1시간', 'test_1시간', '제1시간', '1시간.txt', '/tmp/1시간.wav',
+                     '한 시간', '24시간', '12시 12분']:
+            self.assertIsNone(tn.overrides.SINGLE_HOUR.search(text), text)
