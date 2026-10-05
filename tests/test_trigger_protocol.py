@@ -75,10 +75,27 @@ class TriggerProtocolTests(unittest.TestCase):
         self.assertIn('1. TTS custom override / 정규화 예외 사전 반복 작업', message)
         self.assertIn('현재 명령은 위 목록의 "TTS custom override / 정규화 예외 사전 반복 작업" 항목에 해당합니다.', message)
         self.assertIn('Yuki TTS Deferred Issues', message)
-        self.assertIn('[HUMAN_PRONUNCIATION] commit', message)
-        self.assertIn('[GENERATION_FAILURE] reference', message)
+        self.assertIn('[HUMAN_PRONUNCIATION] [SOURCE:CUSTOM] commit', message)
+        self.assertIn('[GENERATION_FAILURE] [SOURCE:CUSTOM] reference', message)
         self.assertIn('[PERFORMANCE>1%]', message)
         self.assertIn('baseline 대비 1.0%를 초과', message)
+        self.assertNotIn('merge에는 USER 승인을 받으세요', message)
+
+    def test_satoshi_training_shape_is_preapproved_without_marker(self):
+        self.inbox.write_text(
+            '# USER: satoshi.md 교육 Part 2/12\n'
+            'QUEUE_REVISION=3\n\n'
+            '- CODEX_ENIKK_TTS_UPSTREAM=0 custom-only.\n'
+            '성공 시 자동 풀반영:\n'
+            '- commit -> main FF merge -> push -> production update\n\n'
+            'EOF\n'
+        )
+        result = self.request()
+        self.assertEqual(result['status'], 'ACCEPTED')
+        message = self.service.observer.calls[0][1]['input'][0]['text']
+        self.assertIn('별도 USER 재승인 없이 수행하세요', message)
+        self.assertIn('2. satoshi.md 12파트 custom-only TTS 교육', message)
+        self.assertIn('현재 명령은 위 목록의 "satoshi.md 12파트 custom-only TTS 교육" 항목에 해당합니다.', message)
         self.assertNotIn('merge에는 USER 승인을 받으세요', message)
 
     def test_invalid_eof(self):

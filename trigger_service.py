@@ -34,6 +34,17 @@ AUTO_APPROVED_SCOPES = (
             '- 검증되면 커밋한다.',
         ),
     },
+    {
+        'id': 'SATOSHI_TRAINING_12PART_V1',
+        'label': 'satoshi.md 12파트 custom-only TTS 교육',
+        'marker': 'AUTO_MERGE_APPROVED:SATOSHI_TRAINING_12PART_V1',
+        'required': (
+            '# USER: satoshi.md 교육 Part ',
+            'QUEUE_REVISION=3',
+            'CODEX_ENIKK_TTS_UPSTREAM=0 custom-only',
+            '성공 시 자동 풀반영:',
+        ),
+    },
 )
 
 
