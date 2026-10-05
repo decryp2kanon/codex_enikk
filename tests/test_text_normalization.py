@@ -131,6 +131,13 @@ class ExceptionBoundaryTests(unittest.TestCase):
                      '수 초', '수 있도록', '수 없어']:
             self.assertIsNone(pattern.search(text), text)
 
+    def test_su_ittorok_protection_has_narrow_boundaries(self):
+        pattern = tn.overrides.SU_ITTOROK_PHRASE
+        self.assertIsNotNone(pattern.search('이어받을 수 있도록 상태를 남긴다.'))
+        for text in ['수요일', '수 있도록이', '가수 있도록', '수 있도록.txt',
+                     '수 초가', '수 없어']:
+            self.assertIsNone(pattern.search(text), text)
+
     def test_thousands_groups_only(self):
         pattern = tn.overrides.GROUPED_INTEGER
         convert = lambda t: pattern.sub(lambda m:m.group().replace(',', ''), t)
@@ -184,6 +191,12 @@ class KnownErrorIntegrationTests(unittest.TestCase):
     def test_few_seconds_duration_is_not_wednesday(self):
         self.assertEqual(self.client.normalize('retry 때문에 수 초가 더 걸렸어.'),
                          'retry 때문에 수 초가 더 걸렸어.')
+        self.assertEqual(self.client.normalize('수요일에는 쉬겠습니다.'),
+                         '수요일에는 쉬겠습니다.')
+
+    def test_su_ittorok_is_not_wednesday(self):
+        self.assertEqual(self.client.normalize('이어받을 수 있도록 branch 상태를 남길게.'),
+                         '이어받을 수 있도록 branch 상태를 남길게.')
         self.assertEqual(self.client.normalize('수요일에는 쉬겠습니다.'),
                          '수요일에는 쉬겠습니다.')
 

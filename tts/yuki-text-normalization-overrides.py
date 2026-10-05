@@ -46,6 +46,7 @@ WORK_NOUN_PHRASE = re.compile(r'(?<!\w)작은 일부터(?!\w)')
 # Runtime duration "수 초가 더 걸렸어" became "수요일 초가 더 걸렸어".
 # Protect only the reproduced few-seconds phrase with its subject particle.
 FEW_SECONDS_SUBJECT = re.compile(r'(?<![\w/@-])수 초가(?!\w|\.[A-Za-z0-9_])')
+SU_ITTOROK_PHRASE = re.compile(r'(?<![\w/@-])수 있도록(?!\w|\.[A-Za-z0-9_])')
 
 
 # Explicit USER listening failures only; not a general English or letter dictionary.
@@ -90,6 +91,7 @@ def normalize_with_exceptions(text, normalize):
 
     text = WORK_NOUN_PHRASE.sub(lambda match: protect(match.group()), text)
     text = FEW_SECONDS_SUBJECT.sub(lambda match: protect(match.group()), text)
+    text = SU_ITTOROK_PHRASE.sub(lambda match: protect(match.group()), text)
     text = SINGLE_HOUR.sub(lambda match: protect('한 시간'), text)
     text = KNOWN_PROTECTED.sub(lambda match: protect(match.group()), text)
     # Strip commas only from syntactically valid thousands groups, not prose commas.
