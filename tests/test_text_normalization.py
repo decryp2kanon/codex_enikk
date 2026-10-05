@@ -174,6 +174,12 @@ class ExceptionBoundaryTests(unittest.TestCase):
 
 @unittest.skipUnless((Path.home() / 'Apps/enikk-nemo-tn/.venv/bin/python').is_file(), 'isolated NeMo unavailable')
 class KnownErrorIntegrationTests(unittest.TestCase):
+    def test_work_noun_is_not_abbreviated_weekday(self):
+        self.assertEqual(self.client.normalize('작은 일부터 하나씩 시작하면 돼.'),
+                         '작은 일부터 하나씩 시작하면 돼.')
+        self.assertEqual(self.client.normalize('일요일에는 쉬겠습니다.'),
+                         '일요일에는 쉬겠습니다.')
+
     def test_single_hour_attached_eman_uses_native_numeral(self):
         self.assertEqual(self.client.normalize('1시간에만 집중하겠습니다.'),
                          '한 시간에만 집중하겠습니다.')
@@ -302,3 +308,15 @@ class SingleHourParticleBoundaryTests(unittest.TestCase):
                      '제1시간에만', 'test_1시간에만', '1시간에만큼',
                      '1시간에만.txt', '/tmp/1시간에만', '1시간에는']:
             self.assertIsNone(tn.overrides.SINGLE_HOUR.search(text), text)
+
+
+class WorkNounContextTests(unittest.TestCase):
+    def test_only_confirmed_phrase_is_protected(self):
+        public = Mock(side_effect=lambda t:t)
+        self.assertEqual(tn.overrides.normalize_with_exceptions('작은 일부터 하나씩 시작해.', public),
+                         '작은 일부터 하나씩 시작해.')
+        public.assert_called_once()
+        self.assertNotIn('작은 일부터', public.call_args.args[0])
+        for text in ['일요일', '월 화 수 목 금 토 일', '작은 일', '작은 일요일부터',
+                     '아주작은 일부터', '작은 일부터는', '큰 일부터', '오늘 할 일을']:
+            self.assertIsNone(tn.overrides.WORK_NOUN_PHRASE.search(text), text)

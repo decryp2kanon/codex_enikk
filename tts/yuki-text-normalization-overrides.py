@@ -39,6 +39,11 @@ SINGLE_HOUR = re.compile(r'(?<![\w.,+~\-/@:])1시간'
                          r'(?:(?![\w./])|(?=에만(?=\s|[!?,]|$|\.(?=\s|$))))')
 
 
+# Runtime phrase "작은 일부터" means tasks, not the abbreviated weekday 일.
+# NeMo reproduces "작은 일요일 부터" here; protect only this confirmed context.
+WORK_NOUN_PHRASE = re.compile(r'(?<!\w)작은 일부터(?!\w)')
+
+
 # Explicit USER listening failures only; not a general English or letter dictionary.
 HEARD_ERRORS = {'Python': '파이썬', 'CPU': '씨피유', 'TTS': '티티에스',
                 'API': '에이피아이', 'GPU': '지피유', 'VRAM': '브이램',
@@ -79,6 +84,7 @@ def normalize_with_exceptions(text, normalize):
         protected[token] = value
         return token
 
+    text = WORK_NOUN_PHRASE.sub(lambda match: protect(match.group()), text)
     text = SINGLE_HOUR.sub(lambda match: protect('한 시간'), text)
     text = KNOWN_PROTECTED.sub(lambda match: protect(match.group()), text)
     # Strip commas only from syntactically valid thousands groups, not prose commas.
