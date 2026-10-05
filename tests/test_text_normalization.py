@@ -124,6 +124,14 @@ class WorkerNormalizationFailureTests(unittest.TestCase):
                 ready.put(None)
 
 class ExceptionBoundaryTests(unittest.TestCase):
+    def test_su_eopseo_protection_excludes_other_contexts(self):
+        pattern = tn.overrides.SU_EOPSEO_PHRASE
+        self.assertIsNotNone(pattern.search('원인으로 단정할 수 없어.'))
+        for text in ['수요일 없어', '가수 없어', '수 없어도', '수 없어요',
+                     '수 없어.txt', '/수 없어', '@수 없어', '수 있도록',
+                     'CPU GPU API', '수 초가']:
+            self.assertIsNone(pattern.search(text), text)
+
     def test_few_seconds_protection_has_narrow_boundaries(self):
         pattern = tn.overrides.FEW_SECONDS_SUBJECT
         self.assertIsNotNone(pattern.search('retry 때문에 수 초가 더 걸렸어.'))
@@ -188,6 +196,10 @@ class ExceptionBoundaryTests(unittest.TestCase):
 
 @unittest.skipUnless((Path.home() / 'Apps/enikk-nemo-tn/.venv/bin/python').is_file(), 'isolated NeMo unavailable')
 class KnownErrorIntegrationTests(unittest.TestCase):
+    def test_su_eopseo_is_not_wednesday(self):
+        text = '길이나 영문 혼합만 원인으로 단정할 수 없어.'
+        self.assertEqual(self.client.normalize(text), text)
+
     def test_few_seconds_duration_is_not_wednesday(self):
         self.assertEqual(self.client.normalize('retry 때문에 수 초가 더 걸렸어.'),
                          'retry 때문에 수 초가 더 걸렸어.')
