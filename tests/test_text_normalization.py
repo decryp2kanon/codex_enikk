@@ -235,6 +235,15 @@ class ExceptionBoundaryTests(unittest.TestCase):
                      'https://example.com/?name=branch', 'branch@example.com']:
             self.assertEqual(tn.overrides.heard_error_readings(text), text)
 
+    def test_branch_coordinating_particle_matches_vowel_reading(self):
+        self.assertEqual(
+            tn.overrides.heard_error_readings('GitHub에서는 branch과 switch가 바뀌었다.'),
+            'GitHub에서는 브랜치와 switch가 바뀌었다.')
+        for text in ['branch과_switch', 'branch과.py', '/tmp/branch과 switch',
+                     'feature/branch과 switch', 'https://example.com/branch과',
+                     'branch과@example.com']:
+            self.assertEqual(tn.overrides.heard_error_readings(text), text)
+
     def test_large_item_count_boundaries(self):
         pattern = tn.overrides.LARGE_ITEM_COUNT
         self.assertIsNotNone(pattern.search('284개를 확인한다.'))

@@ -89,12 +89,16 @@ HEARD_ERRORS = {'Python': '파이썬', 'CPU': '씨피유', 'TTS': '티티에스'
                 'km/h': '킬로미터 퍼 아워',
                 # USER-reported failure; raw/1.25x Whisper small/base reproduced it.
                 'branch': '브랜치'}
-HEARD_TOKEN = re.compile(r'(?<![A-Za-z0-9_./@-])(?:Python|CPU|TTS|API|GPU|VRAM|km/h|branch)'
+HEARD_TOKEN = re.compile(r'(?<![A-Za-z0-9_./@-])(?:Python|CPU|TTS|API|GPU|VRAM|km/h|'
+                         r'branch과(?=\s+switch(?=[가-힣\s.,!?]|$))|branch(?!과[._/@-]))'
                          r'(?![A-Za-z0-9_/@-]|\.[A-Za-z0-9_])')
 
 
 def heard_error_readings(text):
     def replace(match):
+        if match.group() == 'branch과':
+            # ``branch`` is read as 브랜치, which takes the coordinating 와.
+            return '브랜치와'
         # Do not reinterpret tokens inside URL/email literals as prose words.
         left = re.search(r'\S*$', text[:match.start()]).group()
         right = re.match(r'\S*', text[match.end():]).group()
