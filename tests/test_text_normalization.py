@@ -124,6 +124,14 @@ class WorkerNormalizationFailureTests(unittest.TestCase):
                 ready.put(None)
 
 class ExceptionBoundaryTests(unittest.TestCase):
+    def test_branch_reading_only_changes_prose_token(self):
+        self.assertEqual(tn.overrides.heard_error_readings('현재 branch 상태와 branch는'),
+                         '현재 브랜치 상태와 브랜치는')
+        for text in ['branches', 'Branch', 'branch_name', 'mybranch', 'branch.py',
+                     '/tmp/branch', 'feature/branch', 'branch-user',
+                     'https://example.com/?name=branch', 'branch@example.com']:
+            self.assertEqual(tn.overrides.heard_error_readings(text), text)
+
     def test_large_item_count_boundaries(self):
         pattern = tn.overrides.LARGE_ITEM_COUNT
         self.assertIsNotNone(pattern.search('284개를 확인한다.'))
@@ -203,6 +211,10 @@ class ExceptionBoundaryTests(unittest.TestCase):
 
 @unittest.skipUnless((Path.home() / 'Apps/enikk-nemo-tn/.venv/bin/python').is_file(), 'isolated NeMo unavailable')
 class KnownErrorIntegrationTests(unittest.TestCase):
+    def test_branch_prose_reading(self):
+        self.assertEqual(self.client.normalize('현재 branch 상태를 확인할게.'),
+                         '현재 브랜치 상태를 확인할게.')
+
     def test_large_item_counts_keep_numeric_value(self):
         for text, expected in [('46개', '사십육 개'),
                                ('61개', '육십일 개'),
@@ -225,7 +237,7 @@ class KnownErrorIntegrationTests(unittest.TestCase):
 
     def test_su_ittorok_is_not_wednesday(self):
         self.assertEqual(self.client.normalize('이어받을 수 있도록 branch 상태를 남길게.'),
-                         '이어받을 수 있도록 branch 상태를 남길게.')
+                         '이어받을 수 있도록 브랜치 상태를 남길게.')
         self.assertEqual(self.client.normalize('수요일에는 쉬겠습니다.'),
                          '수요일에는 쉬겠습니다.')
 

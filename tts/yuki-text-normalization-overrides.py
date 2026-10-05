@@ -58,8 +58,10 @@ SU_EOPSEO_PHRASE = re.compile(r'(?<![\w/@-])수 없어(?!\w|\.[A-Za-z0-9_])')
 # Explicit USER listening failures only; not a general English or letter dictionary.
 HEARD_ERRORS = {'Python': '파이썬', 'CPU': '씨피유', 'TTS': '티티에스',
                 'API': '에이피아이', 'GPU': '지피유', 'VRAM': '브이램',
-                'km/h': '킬로미터 퍼 아워'}
-HEARD_TOKEN = re.compile(r'(?<![A-Za-z0-9_./@-])(?:Python|CPU|TTS|API|GPU|VRAM|km/h)'
+                'km/h': '킬로미터 퍼 아워',
+                # USER-reported failure; raw/1.25x Whisper small/base reproduced it.
+                'branch': '브랜치'}
+HEARD_TOKEN = re.compile(r'(?<![A-Za-z0-9_./@-])(?:Python|CPU|TTS|API|GPU|VRAM|km/h|branch)'
                          r'(?![A-Za-z0-9_/@-]|\.[A-Za-z0-9_])')
 
 
