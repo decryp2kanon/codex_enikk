@@ -823,7 +823,7 @@ def terminal_restore():
             # leave the alternate screen and make the shell cursor visible.
             os.write(fd, b'\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l'
                          b'\x1b[?1006l\x1b[?1015l\x1b[?2004l\x1b[?1049l'
-                         b'\x1b[0m\x1b[?25h')
+                         b'\x1b[0m\x1b[?25h\r\x1b[J')
             restored = True
         except (OSError, termios.error):
             pass  # A closed terminal must not prevent session cleanup.

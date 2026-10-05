@@ -29,7 +29,8 @@ class TerminalRestoreTests(unittest.TestCase):
             data = os.read(master, 4096)
             self.assertIn(b'\x1b[?1006l', data)
             self.assertIn(b'\x1b[?2004l', data)
-            self.assertIn(b'\x1b[?25h', data)
+            self.assertIn(b'\x1b[?25h\r\x1b[J', data)
+            self.assertLess(data.index(b'\x1b[?1049l'), data.index(b'\r\x1b[J'))
             self.assertEqual(data.count(b'\x1b[?1006l'), 1)
         finally:
             os.close(master)
