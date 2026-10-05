@@ -8,6 +8,7 @@ from pathlib import Path
 import signal
 import socket
 import stat
+import subprocess
 import tempfile
 import threading
 import time
@@ -53,6 +54,38 @@ def auto_approved_scope(command_text):
         if scope['marker'] in command_text or all(value in command_text for value in scope['required']):
             return scope
     return None
+
+
+def satoshi_training_part(command_text):
+    prefix = '# USER: satoshi.md 교육 Part '
+    for line in command_text.splitlines():
+        if line.startswith(prefix):
+            try:
+                part = int(line[len(prefix):].split('/', 1)[0])
+            except ValueError:
+                return None
+            return part if 1 <= part <= 12 else None
+    return None
+
+
+def satoshi_marker(part):
+    return Path.home() / '.local/state/codex_enikk/satoshi-training' / f'part{part:02d}-production-verified'
+
+
+def schedule_satoshi_postprocess(task, part):
+    script = Path(__file__).resolve().parent / 'satoshi_training_supervisor.py'
+    if not script.is_file():
+        raise OSError('missing satoshi training supervisor')
+    unit = f'codex-enikk-satoshi-part{part:02d}-{task.name[:8]}'
+    environment = os.environ.copy()
+    environment.setdefault('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
+    environment.setdefault('DBUS_SESSION_BUS_ADDRESS', f'unix:path=/run/user/{os.getuid()}/bus')
+    subprocess.run([
+        'systemd-run', '--user', '--collect', '--unit', unit,
+        '/usr/bin/python3', str(script), '--part', str(part), '--task-id', task.name,
+        '--wrapper-pid', str(os.getppid()),
+    ], env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+       timeout=10, check=True)
 
 
 def atomic(path, value):
@@ -232,12 +265,18 @@ class Service:
             return False
         self.completed_tokens[token] = turn.get('id')
         if self.current_task:
-            path = self.current_task / 'state.json'
+            task = self.current_task
+            path = task / 'state.json'
+            completed = turn.get('status') == 'completed'
             state = json.loads(path.read_text())
-            state.update(status='COMPLETED' if turn.get('status') == 'completed' else 'FAILED_EXPLICITLY',
+            state.update(status='COMPLETED' if completed else 'FAILED_EXPLICITLY',
                          turn_id=turn.get('id'))
             atomic(path, state)
             self.current_task = None
+            if completed:
+                part = satoshi_training_part((task / 'command.md').read_text(encoding='utf-8'))
+                if part is not None:
+                    schedule_satoshi_postprocess(task, part)
         self.queue_wakeup.set()
         return True
 
@@ -316,8 +355,11 @@ class Service:
             if self.arbiter.state != 'IDLE' or not queued:
                 return None
             task = queued[0]
-            state = json.loads((task / 'state.json').read_text())
             data = (task / 'command.md').read_bytes()
+            part = satoshi_training_part(data.decode('utf-8'))
+            if part is not None and part > 1 and not satoshi_marker(part - 1).is_file():
+                return None
+            state = json.loads((task / 'state.json').read_text())
             if hashlib.sha256(data).hexdigest() != state['sha256']:
                 self.arbiter.lost()
                 raise UnknownEffect('queued snapshot integrity failure')
@@ -399,7 +441,7 @@ class Service:
             return
         def dispatch():
             while not self.stopped.is_set():
-                self.queue_wakeup.wait()
+                self.queue_wakeup.wait(timeout=1.0)
                 self.queue_wakeup.clear()
                 if self.stopped.is_set():
                     return

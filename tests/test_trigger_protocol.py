@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from submission_arbiter import Busy, UnknownEffect
-from trigger_service import Service, FIXTURE, inbox_bytes, native_client, Session
+from trigger_service import Service, FIXTURE, inbox_bytes, native_client, Session, satoshi_training_part
 from trigger_transport import Downstream, rpc_object, accept_websocket
 
 
@@ -97,6 +97,30 @@ class TriggerProtocolTests(unittest.TestCase):
         self.assertIn('2. satoshi.md 12파트 custom-only TTS 교육', message)
         self.assertIn('현재 명령은 위 목록의 "satoshi.md 12파트 custom-only TTS 교육" 항목에 해당합니다.', message)
         self.assertNotIn('merge에는 USER 승인을 받으세요', message)
+
+    def test_satoshi_part_parser_and_previous_marker_gate(self):
+        body = ('# USER: satoshi.md 교육 Part 3/12\nQUEUE_REVISION=3\n\n'
+                '- CODEX_ENIKK_TTS_UPSTREAM=0 custom-only.\n성공 시 자동 풀반영:\n\nEOF\n')
+        self.assertEqual(satoshi_training_part(body), 3)
+        self.inbox.write_text(body)
+        with patch('trigger_service.satoshi_marker', return_value=self.root / 'missing-marker'):
+            result = self.request()
+        self.assertEqual(result['status'], 'QUEUED')
+
+    def test_satoshi_completed_turn_schedules_postprocess(self):
+        self.inbox.write_text(
+            '# USER: satoshi.md 교육 Part 2/12\nQUEUE_REVISION=3\n\n'
+            '- CODEX_ENIKK_TTS_UPSTREAM=0 custom-only.\n성공 시 자동 풀반영:\n\nEOF\n'
+        )
+        with patch('trigger_service.satoshi_marker', return_value=self.root / 'ready'):
+            (self.root / 'ready').write_text('PASS')
+            result = self.request()
+        self.assertEqual(result['status'], 'ACCEPTED')
+        event = {'method':'turn/completed','params':{'threadId':'thread','turn':{'id':'delegated-turn','status':'completed'}}}
+        with patch('trigger_service.schedule_satoshi_postprocess') as schedule:
+            self.service.received(self.service.observer, event)
+        schedule.assert_called_once()
+        self.assertEqual(schedule.call_args.args[1], 2)
 
     def test_invalid_eof(self):
         self.inbox.write_text('do something')

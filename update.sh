@@ -50,12 +50,12 @@ trap cleanup EXIT
 if [[ -f "$lib/latest.py" ]]; then
     cp -a -- "$lib/latest.py" "$previous/latest.py"
 fi
-for file in persistence.py restore.py check_codex_compat.py check-codex-compat uninstall.sh handoff_command.py submission_arbiter.py trigger_transport.py trigger_service.py trigger_client.py enikk-trigger; do
+for file in persistence.py restore.py check_codex_compat.py check-codex-compat uninstall.sh handoff_command.py submission_arbiter.py trigger_transport.py trigger_service.py trigger_client.py satoshi_training_supervisor.py enikk-trigger; do
     if [[ -f "$lib/$file" ]]; then
         cp -a -- "$lib/$file" "$previous/$file"
     fi
 done
-for file in README.md VERSION latest.py persistence.py restore.py enikk.py check_codex_compat.py check-codex-compat uninstall.sh handoff_command.py submission_arbiter.py trigger_transport.py trigger_service.py trigger_client.py enikk-trigger; do
+for file in README.md VERSION latest.py persistence.py restore.py enikk.py check_codex_compat.py check-codex-compat uninstall.sh handoff_command.py submission_arbiter.py trigger_transport.py trigger_service.py trigger_client.py satoshi_training_supervisor.py enikk-trigger; do
     temporary="$(mktemp "$lib/.$file.XXXXXXXX")"
     install -m 644 -- "$source_dir/$file" "$temporary"
     mv -f -- "$temporary" "$lib/$file"
