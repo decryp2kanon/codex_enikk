@@ -59,6 +59,16 @@ SU_ISSEO_PHRASE = re.compile(r'(?<![\w/@-])수 (?:있으므로|있어)(?!\w|\.[A
 AUDITED_NOUN_PHRASE = re.compile(
     r'(?<![\w/@-])(?:수 (?:있습니다|없어요|없어서|있는|있다)|일 하나를)'
     r'(?!\w|\.[A-Za-z0-9_])')
+# Book-prose cases found in round 29: NeMo changes these dependent-noun
+# readings to Wednesday. Keep only reproduced endings; do not protect bare 수.
+LITERARY_SU_PHRASE = re.compile(
+    r'(?<![\w/@-])수 (?:있을지|없는|없이|있었다)(?!\w|\.[A-Za-z0-9_])')
+# In prose, this means several moves ahead (for example, in a board game).
+SEVERAL_MOVES_AHEAD = re.compile(
+    r'(?<![\w/@-])몇 수 앞을(?!\w|\.[A-Za-z0-9_])')
+# NeMo turns the numeral-duration phrase "일 년" into Sunday + year.
+ONE_YEAR_DURATION = re.compile(
+    r'(?<![\w/@-])일 년(?!\w|\.[A-Za-z0-9_])')
 # Round-27 fixtures: inflected ability, throat/gold/work/day-count contexts.
 # Protect complete confirmed spans; never replace bare weekday initials globally.
 WEEKDAY_COLLISION_PHRASE = re.compile(
@@ -121,6 +131,9 @@ def normalize_with_exceptions(text, normalize):
     text = SU_EOPSEO_PHRASE.sub(lambda match: protect(match.group()), text)
     text = SU_ISSEO_PHRASE.sub(lambda match: protect(match.group()), text)
     text = AUDITED_NOUN_PHRASE.sub(lambda match: protect(match.group()), text)
+    text = LITERARY_SU_PHRASE.sub(lambda match: protect(match.group()), text)
+    text = SEVERAL_MOVES_AHEAD.sub(lambda match: protect(match.group()), text)
+    text = ONE_YEAR_DURATION.sub(lambda match: protect(match.group()), text)
     text = WEEKDAY_INITIAL_FILENAME.sub(lambda match: protect(match.group()), text)
     text = WEEKDAY_COLLISION_PHRASE.sub(lambda match: protect(match.group()), text)
     text = SINGLE_HOUR.sub(lambda match: protect('한 시간'), text)

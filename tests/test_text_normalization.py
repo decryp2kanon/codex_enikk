@@ -147,6 +147,24 @@ class ExceptionBoundaryTests(unittest.TestCase):
                      '수 있다는', '수 없어요.txt', '일 하나둘', '수 있었어요']:
             self.assertIsNone(pattern.search(text), text)
 
+    def test_literary_weekday_collisions_have_identifier_boundaries(self):
+        cases = [
+            (tn.overrides.LITERARY_SU_PHRASE,
+             ['수 있을지', '수 없는', '수 없이', '수 있었다'],
+             ['수요일 있을지', '가수 없는', '/수 없이', '수 있었다.py', '수 있었던']),
+            (tn.overrides.SEVERAL_MOVES_AHEAD,
+             ['몇 수 앞을'],
+             ['몇 수 앞', '아몇 수 앞을', '/몇 수 앞을', '몇 수 앞을.txt']),
+            (tn.overrides.ONE_YEAR_DURATION,
+             ['일 년', '일 년 동안'],
+             ['일 년도', '/일 년', '일 년.txt', '일요일 년']),
+        ]
+        for pattern, positives, negatives in cases:
+            for text in positives:
+                self.assertIsNotNone(pattern.search(text), text)
+            for text in negatives:
+                self.assertIsNone(pattern.search(text), text)
+
     def test_su_isseo_protection_has_narrow_boundaries(self):
         pattern = tn.overrides.SU_ISSEO_PHRASE
         for text in ['설치할 수 있으므로 중단한다.', '변경이 섞일 수 있어.']:
@@ -306,6 +324,19 @@ class KnownErrorIntegrationTests(unittest.TestCase):
                          '작은 일부터 하나씩 시작하면 돼.')
         self.assertEqual(self.client.normalize('일요일에는 쉬겠습니다.'),
                          '일요일에는 쉬겠습니다.')
+
+    def test_literary_dependent_nouns_and_one_year_are_not_weekdays(self):
+        for text in [
+                '몇 수 앞을 내다보는 노인의 눈빛에는 서두름이 없었다.',
+                '끝까지 해낼 수 있을지 걱정됐지만 동료의 격려가 힘이 되었다.',
+                '이번에는 놓칠 수 없는 기회라고 생각해 그는 먼 길을 떠났다.',
+                '한 번에 할 수 없는 일이라면 작은 단계로 나누어 시작하면 된다.',
+                '오늘은 어쩔 수 없이 떠나지만 내일 해가 뜨면 돌아오겠다고 말했다.',
+                '몇 차례의 시도 끝에 아이는 제 힘으로 매듭을 묶을 수 있었다.',
+                '짧은 목차만으로도 이 책이 어떤 질문을 다루는지 알 수 있었다.',
+                '그들은 일 년 동안 모은 기록을 한 권의 책으로 엮었다.']:
+            with self.subTest(text=text):
+                self.assertEqual(self.client.normalize(text), text)
 
     def test_single_hour_attached_eman_uses_native_numeral(self):
         self.assertEqual(self.client.normalize('1시간에만 집중하겠습니다.'),
