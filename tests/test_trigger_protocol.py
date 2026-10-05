@@ -128,6 +128,22 @@ class TriggerProtocolTests(unittest.TestCase):
         self.service.received(observer, {'id': 7, 'result': {'turn': {'id': 'fast'}}})
         self.assertEqual(self.service.arbiter.state, 'IDLE')
 
+    def test_transport_only_unknown_recovers_from_authoritative_idle(self):
+        self.service.arbiter.lost()
+        reply = {'thread': {'id': 'thread', 'status': {'type': 'idle'}}}
+        with patch.object(self.service.observer, 'call', return_value=reply) as call:
+            self.service.reconcile_idle()
+        call.assert_called_once_with('thread/read', {'threadId': 'thread', 'includeTurns': False})
+        self.assertEqual(self.service.arbiter.state, 'IDLE')
+
+    def test_active_or_wrong_thread_cannot_reconcile_unknown(self):
+        for thread in ({'id': 'thread', 'status': {'type': 'active'}},
+                       {'id': 'other', 'status': {'type': 'idle'}}):
+            self.service.arbiter.lost()
+            with patch.object(self.service.observer, 'call', return_value={'thread': thread}):
+                self.service.reconcile_idle()
+            self.assertEqual(self.service.arbiter.state, 'UNKNOWN')
+
     def test_dropped_response_durable_unknown(self):
         with patch.object(self.service.observer, 'call', side_effect=TimeoutError):
             result = self.request()

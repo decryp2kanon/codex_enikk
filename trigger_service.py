@@ -125,11 +125,27 @@ class Service:
         else:
             self.arbiter.initialize(result['thread'])
 
+    def reconcile_idle(self):
+        # A read-only server reply may recover transport-only UNKNOWN. Never
+        # release an unresolved submission or a durable ambiguous delivery.
+        with self.guard:
+            if (self.arbiter.state != 'UNKNOWN' or self.arbiter.token is not None or
+                    not self.recoverable_idle or not self.observer or
+                    not getattr(self.observer, 'alive', True)):
+                return
+        try:
+            result = self.observer.call('thread/read', {'threadId': self.thread_id,
+                                                       'includeTurns': False})
+            self.received(self.observer, {'result': result})
+        except (OSError, UnknownEffect):
+            pass
+
     def native_request(self, session, event):
         method = event.get('method')
         params = event.get('params') or {}
         if not isinstance(params, dict): raise ValueError('invalid params')
         if method in SUBMITS:
+            self.reconcile_idle()
             if 'id' not in event: raise ValueError('submission requires request ID')
             # Explicit native steering of its own USER turn keeps native behavior.
             with self.guard:
@@ -169,6 +185,11 @@ class Service:
                                 self.arbiter.lost()
                             return
                         self.arbiter.accepted(token, turn['id'])
+                        if self.current_task and self.arbiter.owner == 'DOROTHY':
+                            path = self.current_task / 'state.json'
+                            state = json.loads(path.read_text())
+                            state.update(status='ACCEPTED', turn_id=turn['id'])
+                            atomic(path, state)
                         if turn['id'] in self.completed_early:
                             self.arbiter.completed(self.thread_id, turn['id'])
             # One authoritative event stream avoids cross-connection reorder.
@@ -183,7 +204,7 @@ class Service:
                 elif self.arbiter.turn != turn.get('id'):
                     self.arbiter.lost()
             elif method == 'turn/completed':
-                if self.arbiter.state.endswith('_RESERVED'):
+                if self.arbiter.state.endswith('_RESERVED') or (self.arbiter.state == 'UNKNOWN' and self.arbiter.token is not None and self.arbiter.turn is None):
                     self.completed_early.add(turn.get('id'))
                 current_token = self.arbiter.token
                 terminal = self.arbiter.completed(self.thread_id, turn.get('id'))
