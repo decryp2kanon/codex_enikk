@@ -19,6 +19,9 @@ def proper_names(text):
 # Reproduced NeMo errors and USER-confirmed unit readings. Case matters: GB != Gb.
 # Other numeric/SI rules, ordinary Korean and mathematical operators stay upstream.
 GROUPED_INTEGER = re.compile(r'(?<![A-Za-z0-9_.,])[1-9]\d{0,2}(?:,\d{3})+(?!\d|,\d)')
+# Reproduced 46개/61개/282개/284개/1,024개 were split into smaller counts.
+# Keep correct native readings for other two-digit counts; use public cardinal TN.
+LARGE_ITEM_COUNT = re.compile(r'(?<![\w.,+/@-])(46|61|[1-9]\d{2,})개(?![A-Za-z0-9_./])')
 KNOWN_UNITS = {'GB': '기가바이트', 'MB': '메가바이트', 'TB': '테라바이트',
                'kHz': '킬로헤르츠', 'kbps': '킬로비트 퍼 초', 'km/h': '킬로미터 퍼 아워'}
 NUMBER_UNIT = re.compile(r'(?<![A-Za-z0-9_.,+-])(?P<number>-?\d+(?:\.\d+)?)'
@@ -47,6 +50,9 @@ WORK_NOUN_PHRASE = re.compile(r'(?<!\w)작은 일부터(?!\w)')
 # Protect only the reproduced few-seconds phrase with its subject particle.
 FEW_SECONDS_SUBJECT = re.compile(r'(?<![\w/@-])수 초가(?!\w|\.[A-Za-z0-9_])')
 SU_ITTOROK_PHRASE = re.compile(r'(?<![\w/@-])수 있도록(?!\w|\.[A-Za-z0-9_])')
+# Observed model input: "단정할 수 없어" -> "단정할 수요일 없어".
+# Only this confirmed inflection; leave weekdays and other 수 contexts upstream.
+SU_EOPSEO_PHRASE = re.compile(r'(?<![\w/@-])수 없어(?!\w|\.[A-Za-z0-9_])')
 
 
 # Explicit USER listening failures only; not a general English or letter dictionary.
@@ -92,10 +98,13 @@ def normalize_with_exceptions(text, normalize):
     text = WORK_NOUN_PHRASE.sub(lambda match: protect(match.group()), text)
     text = FEW_SECONDS_SUBJECT.sub(lambda match: protect(match.group()), text)
     text = SU_ITTOROK_PHRASE.sub(lambda match: protect(match.group()), text)
+    text = SU_EOPSEO_PHRASE.sub(lambda match: protect(match.group()), text)
     text = SINGLE_HOUR.sub(lambda match: protect('한 시간'), text)
     text = KNOWN_PROTECTED.sub(lambda match: protect(match.group()), text)
     # Strip commas only from syntactically valid thousands groups, not prose commas.
     text = GROUPED_INTEGER.sub(lambda match: match.group().replace(',', ''), text)
+    text = LARGE_ITEM_COUNT.sub(
+        lambda match: protect(normalize(match.group(1)) + ' 개'), text)
 
     def unit(match):
         number = normalize(match.group('number'))
