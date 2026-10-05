@@ -69,3 +69,17 @@ The submitted USER message contains a Korean delegation notice, snapshot path,
 and the complete validated UTF-8 command body without truncation. The displayed
 body and immutable snapshot use the same captured bytes. Mutable inbox changes
 do not amend an accepted task. Existing turns are not resent after an update.
+
+
+## 작업 중 명령 대기열
+
+진행 중인 turn을 steer하거나 중단하지 않고 새 명령 원문을 읽기 전용 snapshot으로 보존한다.
+응답 `QUEUED`는 대기열 접수이며 실제 실행 시작인 `ACCEPTED`와 구분한다.
+완료/중단 이벤트 후 FIFO 순서로 전달하며 inbox를 덮어써도 이미 접수된 원문은 바뀌지 않는다.
+최대 32개 대기 항목이며 한도에서는 `QUEUE_FULL`로 거절한다. 같은 snapshot은 중복 실행하지 않는다.
+발송 전의 `QUEUED`만 재시작 후 자동 재개한다. 발송 중 `SENDING`이나 효과가 불명확한
+`UNKNOWN_EFFECT`는 자동 재전송하지 않는다. 새 명령은 보존하지만 미확정 작업이 해결될 때까지 기다린다.
+서버의 일치하는 응답/완료 이벤트나 미확정 예약이 없는 상태의 authoritative idle 응답만 상태 복구 근거로 사용한다.
+시간 제한의 started_at은 큐 접수 시점이 아니라 발송 예약 시점에 설정한다.
+대기 중인 명령 취소: `enikk-trigger --cancel TASK_ID`. 실행 중인 작업은 이 명령으로 중단하지 않는다.
+큐 처리는 완료 이벤트로 깨우며 로그/프로세스를 주기적으로 polling하지 않는다.

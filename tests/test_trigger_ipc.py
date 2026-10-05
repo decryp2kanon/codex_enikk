@@ -60,7 +60,7 @@ class FakeServer:
                 event = json.loads(connection.recv()); self.events.append(event)
                 method = event.get('method')
                 result = {}
-                if method == 'thread/resume':
+                if method in ('thread/resume', 'thread/read'):
                     result = {'thread': {'id': 'thread', 'status': {'type': 'idle' if self.active is None else 'active'}}}
                 elif method == 'turn/start':
                     with self.lock:
@@ -93,6 +93,7 @@ class IpcTests(unittest.TestCase):
         self.server = FakeServer(self.root / 'up.sock'); self.addCleanup(self.server.close)
         self.service = Service(str(self.root / 'up.sock'), 'thread', self.root / 'state', self.inbox)
         self.service.initialize(); self.addCleanup(self.close_service)
+        self.service.start_dispatcher()
         self.proxy = bind_local(self.root / 'proxy.sock'); self.addCleanup(self.proxy.close)
         self.trigger = bind_local(self.root / 'trigger.sock'); self.addCleanup(self.trigger.close)
         self.stop = threading.Event(); self.addCleanup(self.stop.set)
@@ -106,7 +107,7 @@ class IpcTests(unittest.TestCase):
         self.response(2)
 
     def close_service(self):
-        self.service.stopped.set()
+        self.service.stopped.set(); self.service.queue_wakeup.set()
         for session in list(self.service.sessions): session.close()
 
     def accept(self, listener, handler):
@@ -127,7 +128,7 @@ class IpcTests(unittest.TestCase):
     def test_native_then_dorothy_reserved_race(self):
         self.server.hold.clear(); self.native_submit()
         self.assertTrue(self.server.submitted.wait(3))
-        self.assertEqual(submit(self.root / 'trigger.sock')['status'], 'BUSY')
+        self.assertEqual(submit(self.root / 'trigger.sock')['status'], 'QUEUED')
         self.server.hold.set(); self.response(3)
         self.assertEqual(self.server.count, 1); self.assertEqual(self.server.steered, 0)
 
@@ -187,7 +188,7 @@ class IpcTests(unittest.TestCase):
         try:
             restarted.initialize()
             self.assertEqual(restarted.arbiter.state, 'UNKNOWN')
-            self.assertEqual(restarted.trigger({'action': 'trigger'}, os.getuid())['status'], 'UNKNOWN_EFFECT')
+            self.assertEqual(restarted.trigger({'action': 'trigger'}, os.getuid())['status'], 'QUEUED')
             self.assertEqual(self.server.count, 0)
         finally:
             restarted.stopped.set()
@@ -233,10 +234,11 @@ class IpcTests(unittest.TestCase):
         eventually(lambda: any(not s.alive for s in natives))
         self.assertEqual(self.service.arbiter.state, 'DOROTHY_ACTIVE')
         self.inbox.write_text('new command\n\nEOF\n')
-        self.assertEqual(submit(self.root / 'trigger.sock')['status'], 'BUSY')
+        self.assertEqual(submit(self.root / 'trigger.sock')['status'], 'QUEUED')
         self.server.complete()
-        eventually(lambda: self.service.arbiter.state == 'IDLE')
-        self.assertEqual(submit(self.root / 'trigger.sock')['status'], 'ACCEPTED')
+        eventually(lambda: self.server.count == 2)
+        self.assertEqual(submit(self.root / 'trigger.sock')['status'], 'DUPLICATE')
+        self.assertEqual(self.server.steered, 0)
 
     def test_unresolved_native_send_disconnect_remains_unknown(self):
         from unittest.mock import Mock
@@ -246,7 +248,69 @@ class IpcTests(unittest.TestCase):
         self.service.transport_lost(session)
         self.assertEqual(self.service.arbiter.state, 'UNKNOWN')
 
+    def test_fifo_snapshot_and_no_steering(self):
+        self.native_submit(); self.response(3)
+        ids = []
+        for text in ('first queued', 'second queued', 'third queued'):
+            self.inbox.write_text(text + '\n\nEOF\n')
+            reply = submit(self.root / 'trigger.sock')
+            self.assertEqual(reply['status'], 'QUEUED')
+            ids.append(reply['task_id'])
+        self.assertEqual(submit(self.root / 'trigger.sock')['status'], 'DUPLICATE')
+        self.inbox.write_text('overwritten inbox\n\nEOF\n')
+        for index, task_id in enumerate(ids, 2):
+            self.server.complete()
+            eventually(lambda: self.server.count == index)
+            path = self.service.tasks / task_id / 'state.json'
+            eventually(lambda: json.loads(path.read_text())['status'] == 'ACCEPTED')
+        self.server.complete(); eventually(lambda: self.service.arbiter.state == 'IDLE')
+        messages = [e['params']['input'][0]['text'] for e in self.server.events if e.get('method') == 'turn/start'][1:]
+        self.assertEqual([x.split('===== 명령서 원문 =====\n')[1] for x in messages],
+                         [x + '\n\nEOF\n' for x in ('first queued', 'second queued', 'third queued')])
+        self.assertEqual(self.server.count, 4); self.assertEqual(self.server.steered, 0)
+
+    def test_cancel_queued_never_runs_or_cancels_active(self):
+        self.native_submit(); self.response(3)
+        reply = submit(self.root / 'trigger.sock')
+        task_id = reply['task_id']
+        self.assertEqual(submit(self.root / 'trigger.sock', cancel=task_id)['status'], 'CANCELLED')
+        self.assertEqual(submit(self.root / 'trigger.sock')['delivery_status'], 'CANCELLED')
+        self.server.complete(); eventually(lambda: self.service.arbiter.state == 'IDLE')
+        self.assertEqual(self.server.count, 1)
+
+    def test_known_completion_after_unknown_drains_queue(self):
+        self.assertEqual(submit(self.root / 'trigger.sock')['status'], 'ACCEPTED')
+        self.service.arbiter.lost()
+        self.inbox.write_text('next\n\nEOF\n')
+        self.assertEqual(submit(self.root / 'trigger.sock')['status'], 'QUEUED')
+        self.server.complete()
+        eventually(lambda: self.server.count == 2)
+        self.assertEqual(self.server.steered, 0)
+
+    def test_transport_only_unknown_reconciles_and_drains(self):
+        self.service.arbiter.lost()
+        self.assertEqual(submit(self.root / 'trigger.sock')['status'], 'QUEUED')
+        eventually(lambda: self.server.count == 1)
+        self.assertEqual(self.server.steered, 0)
+
+    def test_restart_retains_and_dispatches_unsent_queue(self):
+        self.native_submit(); self.response(3)
+        reply = submit(self.root / 'trigger.sock'); self.assertEqual(reply['status'], 'QUEUED')
+        self.close_service()
+        self.server.complete()
+        restarted = Service(str(self.root / 'up.sock'), 'thread', self.service.root, self.inbox)
+        try:
+            restarted.initialize(); restarted.start_dispatcher()
+            eventually(lambda: self.server.count == 2)
+            path = restarted.tasks / reply['task_id'] / 'state.json'
+            eventually(lambda: json.loads(path.read_text())['status'] == 'ACCEPTED')
+            self.assertEqual(self.server.steered, 0)
+        finally:
+            restarted.stopped.set(); restarted.queue_wakeup.set()
+            for session in list(restarted.sessions): session.close()
+
     def test_disconnect_fails_closed(self):
         self.server.close()
         eventually(lambda: self.service.arbiter.state == 'UNKNOWN')
-        self.assertEqual(submit(self.root / 'trigger.sock')['status'], 'UNKNOWN_EFFECT')
+        self.assertEqual(submit(self.root / 'trigger.sock')['status'], 'QUEUED')
+        self.assertEqual(self.server.count, 0)

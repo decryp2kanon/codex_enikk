@@ -77,3 +77,25 @@ class ArbiterTests(unittest.TestCase):
         self.a.reserve('USER', 'same-thread')
         with self.assertRaises(UnknownEffect): self.a.accepted('wrong-token', 'turn')
         self.assertEqual(self.a.state, 'UNKNOWN')
+
+
+class RecoveryTests(unittest.TestCase):
+    def arbiter(self):
+        a = Arbiter('thread'); a.initialize({'id': 'thread', 'status': {'type': 'idle'}})
+        token = a.reserve('USER', 'thread')
+        return a, token
+
+    def test_matching_late_response_recovers_unknown_without_resubmission(self):
+        a, token = self.arbiter(); a.lost(); a.accepted(token, 'confirmed')
+        self.assertEqual(a.state, 'USER_ACTIVE')
+
+    def test_known_terminal_event_recovers_unknown(self):
+        a, token = self.arbiter(); a.accepted(token, 'confirmed'); a.lost()
+        self.assertFalse(a.completed('thread', 'different'))
+        self.assertTrue(a.completed('thread', 'confirmed'))
+        self.assertEqual(a.state, 'IDLE')
+
+    def test_unknown_without_turn_id_cannot_complete(self):
+        a, token = self.arbiter(); a.lost()
+        self.assertFalse(a.completed('thread', 'unconfirmed'))
+        self.assertEqual(a.state, 'UNKNOWN')

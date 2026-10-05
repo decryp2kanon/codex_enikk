@@ -77,8 +77,8 @@ class TriggerProtocolTests(unittest.TestCase):
     def test_native_reserved_then_dorothy_busy(self):
         session = FakeObserver(self.service)
         self.service.native_request(session, {'id': 3, 'method': 'turn/start', 'params': {'threadId': 'thread'}})
-        self.assertEqual(self.request()['status'], 'BUSY')
-        self.assertFalse(list(self.service.tasks.iterdir()))
+        self.assertEqual(self.request()['status'], 'QUEUED')
+        self.assertEqual(len(list(self.service.tasks.iterdir())), 1)
 
     def test_dorothy_active_native_busy_no_steer(self):
         self.request()
@@ -90,7 +90,7 @@ class TriggerProtocolTests(unittest.TestCase):
         token = self.service.arbiter.reserve('USER', 'thread')
         self.service.arbiter.accepted(token, 'native')
         self.service.native_request(FakeObserver(self.service), {'id': 3, 'method': 'turn/steer', 'params': {'threadId': 'thread', 'expectedTurnId': 'native'}})
-        self.assertEqual(self.request()['status'], 'BUSY')
+        self.assertEqual(self.request()['status'], 'QUEUED')
 
     def test_turn_completion_records_terminal(self):
         result = self.request()
@@ -127,6 +127,54 @@ class TriggerProtocolTests(unittest.TestCase):
         self.service.received(observer, {'method': 'turn/completed', 'params': {'threadId': 'thread', 'turn': {'id': 'fast', 'status': 'completed'}}})
         self.service.received(observer, {'id': 7, 'result': {'turn': {'id': 'fast'}}})
         self.assertEqual(self.service.arbiter.state, 'IDLE')
+
+    def test_transport_only_unknown_recovers_from_authoritative_idle(self):
+        self.service.arbiter.lost()
+        reply = {'thread': {'id': 'thread', 'status': {'type': 'idle'}}}
+        with patch.object(self.service.observer, 'call', return_value=reply) as call:
+            self.service.reconcile_idle()
+        call.assert_called_once_with('thread/read', {'threadId': 'thread', 'includeTurns': False})
+        self.assertEqual(self.service.arbiter.state, 'IDLE')
+
+    def test_active_or_wrong_thread_cannot_reconcile_unknown(self):
+        for thread in ({'id': 'thread', 'status': {'type': 'active'}},
+                       {'id': 'other', 'status': {'type': 'idle'}}):
+            self.service.arbiter.lost()
+            with patch.object(self.service.observer, 'call', return_value={'thread': thread}):
+                self.service.reconcile_idle()
+            self.assertEqual(self.service.arbiter.state, 'UNKNOWN')
+
+    def test_terminal_before_start_response_is_persisted_and_releases_queue(self):
+        observer = self.service.observer
+        def complete_first(method, params, token=None):
+            observer.pending[999] = token
+            self.service.received(observer, {'method': 'turn/completed',
+                'params': {'threadId': 'thread', 'turn': {'id': 'fast', 'status': 'completed'}}})
+            self.service.received(observer, {'id': 999, 'result': {'turn': {'id': 'fast'}}})
+            return {'turn': {'id': 'fast'}}
+        with patch.object(observer, 'call', side_effect=complete_first):
+            result = self.request()
+        self.assertEqual(result['status'], 'ACCEPTED')
+        state = json.loads((self.service.tasks / result['task_id'] / 'state.json').read_text())
+        self.assertEqual(state['status'], 'COMPLETED')
+        self.assertEqual(self.service.arbiter.state, 'IDLE')
+        self.inbox.write_text('next command\n\nEOF\n')
+        self.assertEqual(self.request()['status'], 'ACCEPTED')
+
+    def test_queue_capacity_rejects_without_snapshot(self):
+        self.service.arbiter.reserve('USER', 'thread')
+        for i in range(32):
+            self.inbox.write_text(str(i) + '\n\nEOF\n')
+            self.assertEqual(self.request()['status'], 'QUEUED')
+        self.inbox.write_text('overflow\n\nEOF\n')
+        self.assertEqual(self.request()['status'], 'QUEUE_FULL')
+        self.assertEqual(len(list(self.service.tasks.iterdir())), 32)
+
+    def test_cancel_requires_exact_owned_queued_id(self):
+        self.assertEqual(self.service.trigger({'action': 'cancel', 'task_id': '../escape'}, os.getuid())['status'], 'INVALID_PATH')
+        self.assertEqual(self.service.trigger({'action': 'cancel', 'task_id': 'a'*64}, os.getuid())['status'], 'NOT_FOUND')
+        result = self.request()
+        self.assertEqual(self.service.trigger({'action': 'cancel', 'task_id': result['task_id']}, os.getuid())['status'], 'BUSY')
 
     def test_dropped_response_durable_unknown(self):
         with patch.object(self.service.observer, 'call', side_effect=TimeoutError):

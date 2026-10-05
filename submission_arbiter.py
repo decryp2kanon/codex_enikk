@@ -44,7 +44,7 @@ class Arbiter:
 
     def accepted(self, token, turn_id):
         with self.lock:
-            if self.state == 'UNKNOWN' or token != self.token or not turn_id:
+            if self.owner not in ('USER', 'DOROTHY') or token != self.token or not turn_id:
                 self.state = 'UNKNOWN'
                 raise UnknownEffect('response reservation mismatch')
             if self.turn is not None and self.turn != turn_id:
@@ -55,7 +55,7 @@ class Arbiter:
 
     def completed(self, thread_id, turn_id):
         with self.lock:
-            if self.state.endswith('_ACTIVE') and thread_id == self.thread_id and turn_id == self.turn:
+            if (self.state.endswith('_ACTIVE') or self.state == 'UNKNOWN') and self.turn is not None and thread_id == self.thread_id and turn_id == self.turn:
                 self.state = 'IDLE'
                 self.owner = self.token = self.turn = None
                 return True
