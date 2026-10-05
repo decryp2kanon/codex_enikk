@@ -124,6 +124,13 @@ class WorkerNormalizationFailureTests(unittest.TestCase):
                 ready.put(None)
 
 class ExceptionBoundaryTests(unittest.TestCase):
+    def test_few_seconds_protection_has_narrow_boundaries(self):
+        pattern = tn.overrides.FEW_SECONDS_SUBJECT
+        self.assertIsNotNone(pattern.search('retry 때문에 수 초가 더 걸렸어.'))
+        for text in ['수요일 초가', '수 초가량', '가수 초가', '수 초가.txt',
+                     '수 초', '수 있도록', '수 없어']:
+            self.assertIsNone(pattern.search(text), text)
+
     def test_thousands_groups_only(self):
         pattern = tn.overrides.GROUPED_INTEGER
         convert = lambda t: pattern.sub(lambda m:m.group().replace(',', ''), t)
@@ -174,6 +181,12 @@ class ExceptionBoundaryTests(unittest.TestCase):
 
 @unittest.skipUnless((Path.home() / 'Apps/enikk-nemo-tn/.venv/bin/python').is_file(), 'isolated NeMo unavailable')
 class KnownErrorIntegrationTests(unittest.TestCase):
+    def test_few_seconds_duration_is_not_wednesday(self):
+        self.assertEqual(self.client.normalize('retry 때문에 수 초가 더 걸렸어.'),
+                         'retry 때문에 수 초가 더 걸렸어.')
+        self.assertEqual(self.client.normalize('수요일에는 쉬겠습니다.'),
+                         '수요일에는 쉬겠습니다.')
+
     def test_work_noun_is_not_abbreviated_weekday(self):
         self.assertEqual(self.client.normalize('작은 일부터 하나씩 시작하면 돼.'),
                          '작은 일부터 하나씩 시작하면 돼.')
