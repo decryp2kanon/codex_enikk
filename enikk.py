@@ -20,6 +20,7 @@ import sys
 import tarfile
 import tempfile
 import threading
+import termios
 from datetime import datetime, timezone
 from latest import Mirror
 from persistence import DATABASES, snapshots, validate_database, validate_rollouts
@@ -798,6 +799,43 @@ def submission_proxy(endpoint, session_id, python):
                         process.kill(); process.wait()
 
 
+@contextmanager
+def terminal_restore():
+    """Restore the caller's terminal even when the native TUI leaves raw mode."""
+    fd = None
+    saved = None
+    restored = False
+    try:
+        candidate = sys.stdin.fileno()
+        if os.isatty(candidate):
+            saved = termios.tcgetattr(candidate)
+            fd = os.dup(candidate)
+    except (AttributeError, OSError, ValueError, termios.error):
+        pass
+
+    def restore():
+        nonlocal restored
+        if fd is None or restored:
+            return
+        try:
+            termios.tcsetattr(fd, termios.TCSANOW, saved)
+            # DEC modes are not part of termios: stop mouse/paste reports,
+            # leave the alternate screen and make the shell cursor visible.
+            os.write(fd, b'\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l'
+                         b'\x1b[?1006l\x1b[?1015l\x1b[?2004l\x1b[?1049l'
+                         b'\x1b[0m\x1b[?25h\r\x1b[J')
+            restored = True
+        except (OSError, termios.error):
+            pass  # A closed terminal must not prevent session cleanup.
+
+    try:
+        yield restore
+    finally:
+        restore()
+        if fd is not None:
+            os.close(fd)
+
+
 def conversation(session_id, instance_fd, args=()):
     """Let the native TUI own the terminal, clipboard, slash commands and rendering."""
     yolo = '--dangerously-bypass-approvals-and-sandbox'
@@ -814,7 +852,7 @@ def conversation(session_id, instance_fd, args=()):
     command = ['codex', 'resume', session_id, yolo, '--no-daemon', '-c', 'notify=[]', *options]
     # Inherit stdin/stdout/stderr and the foreground terminal. Do not pipe or
     # parse TUI output: doing so breaks image paste, raw input and rendering.
-    with owned_processes(), tts_run(), Mirror(
+    with terminal_restore() as restore_terminal, owned_processes(), tts_run(), Mirror(
             codex_home() / 'thread_history_1.sqlite', session_id,
             Path.home() / 'codex-latest.txt',
             Path(os.environ['CODEX_ENIKK_TTS_STATE']) / 'mirror-thread.json'):
@@ -849,6 +887,7 @@ def conversation(session_id, instance_fd, args=()):
             finally:
                 if child.poll() is not None:
                     child.wait()
+                    restore_terminal()
 
 
 def main(args=None):
