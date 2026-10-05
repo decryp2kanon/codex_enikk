@@ -82,6 +82,7 @@ def schedule_satoshi_postprocess(task, part):
     environment.setdefault('DBUS_SESSION_BUS_ADDRESS', f'unix:path=/run/user/{os.getuid()}/bus')
     subprocess.run([
         'systemd-run', '--user', '--collect', '--unit', unit,
+        '--property=Restart=on-failure', '--property=RestartSec=5s',
         '/usr/bin/python3', str(script), '--part', str(part), '--task-id', task.name,
         '--wrapper-pid', str(os.getppid()),
     ], env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

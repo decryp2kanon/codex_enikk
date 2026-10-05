@@ -37,5 +37,22 @@ class SatoshiSupervisorTests(unittest.TestCase):
             self.assertEqual(result[1],'FAILED')
             self.assertFalse(result[0])
 
+    def test_checkpoint_retries_only_failed_parts_until_success(self):
+        data={'delivery':{'parts':['a','b','c'],'terminal':{'0':'PLAYED','1':'FAILED_EXPLICITLY','2':'PLAYED'}}}
+        state={}
+        with tempfile.TemporaryDirectory() as td:
+            state_path=Path(td)/'state.json'
+            calls=[]
+            outcomes=[(False,'FAILED',Path(td)/'f1',{'delivery':{'parts':['b'],'terminal':{'0':'FAILED_EXPLICITLY'}}}),
+                      (True,'PLAYED',Path(td)/'p2',{'delivery':{'parts':['b'],'terminal':{'0':'PLAYED'}}})]
+            def fake_publish(run,part,text,attempt):
+                calls.append((part,text,attempt)); return Path(td)/'job'
+            with patch.object(SUP,'publish',side_effect=fake_publish), patch.object(SUP,'wait_receipt',side_effect=outcomes), patch.object(SUP.time,'sleep'):
+                result=SUP.retry_failed_parts(Path(td),2,data,10,state_path,state)
+            self.assertEqual([c[1] for c in calls],['b','b'])
+            self.assertEqual(result['parts'],3)
+            self.assertEqual(result['completed_parts'],3)
+            self.assertEqual(result['targeted_attempts'],2)
+
 if __name__ == '__main__':
     unittest.main()

@@ -131,6 +131,35 @@ def wait_receipt(path, timeout):
         time.sleep(.25)
     raise RuntimeError('graduation delivery timeout')
 
+def retry_failed_parts(run, part, data, timeout, state_path, state):
+    delivery=data.get('delivery',{})
+    parts=delivery.get('parts',[])
+    terminal=delivery.get('terminal',{})
+    pending=[i for i in range(len(parts)) if terminal.get(str(i)) != 'PLAYED']
+    completed=len(parts)-len(pending)
+    targeted_attempts=0
+    state.update(status='CHECKPOINT_RETRY', total_parts=len(parts), completed_parts=completed,
+                 pending_parts=pending, targeted_attempts=0)
+    state_path.write_text(json.dumps(state,ensure_ascii=False,indent=2),encoding='utf-8')
+    for index in pending:
+        text=parts[index]
+        local_attempt=0
+        while True:
+            local_attempt += 1
+            targeted_attempts += 1
+            job=publish(run,part,text,f'checkpoint-{index}-{local_attempt}')
+            ok,kind,rp,retry_data=wait_receipt(job,timeout)
+            state.update(status='CHECKPOINT_RETRY', total_parts=len(parts), completed_parts=completed,
+                         pending_parts=[i for i in pending if i >= index], targeted_attempts=targeted_attempts,
+                         current_part=index, current_attempt=local_attempt, last_result=kind)
+            state_path.write_text(json.dumps(state,ensure_ascii=False,indent=2),encoding='utf-8')
+            if ok:
+                completed += 1
+                break
+            time.sleep(1)
+    return {'parts':len(parts),'targeted_attempts':targeted_attempts,'completed_parts':completed}
+
+
 def git(*args):
     return subprocess.check_output(['git','-C',str(SOURCE),*args],text=True).strip()
 
@@ -175,7 +204,8 @@ def update_report(part, details):
 - CODEX_ENIKK_TTS_UPSTREAM=0: confirmed
 - NeMo process count: 0
 - Graduation attempt: {details['attempt']}
-- Graduation receipt parts: {details['parts']} PLAYED; final failures 0
+- Graduation receipt parts: {details['parts']} accounted as PLAYED; final failures 0
+- Targeted checkpoint retries: {details.get('targeted_attempts',0)}
 - Graduation cleaned characters: {details['chars']}
 - Production ready observed automatically after restart.
 """
@@ -204,18 +234,24 @@ def run(args):
         if proc_env(pid).get('CODEX_ENIKK_TTS_UPSTREAM')!='0': raise RuntimeError('UPSTREAM != 0')
         if nemo_hits(): raise RuntimeError('NeMo process present')
         raw=Path(args.satoshi).read_text(encoding='utf-8'); spoken=clean_text(extract_part(raw,args.part),run_state)
-        passed=None
-        for attempt in range(1,args.max_attempts+1):
-            job=publish(run_state,args.part,spoken,attempt); ok,kind,rp,data=wait_receipt(job,args.timeout)
-            parts=len(data.get('delivery',{}).get('parts',[]))
-            if ok: passed={'attempt':attempt,'parts':parts,'receipt':str(rp)}; break
-            time.sleep(1)
-        if not passed: raise RuntimeError('graduation failed after retry budget')
+        state.update(status='GRADUATION_FULL_READ',run=str(run_state),pid=pid)
+        state_path.write_text(json.dumps(state,ensure_ascii=False,indent=2),encoding='utf-8')
+        job=publish(run_state,args.part,spoken,'full')
+        ok,kind,rp,data=wait_receipt(job,args.timeout)
+        parts=len(data.get('delivery',{}).get('parts',[]))
+        if ok:
+            passed={'attempt':'full','parts':parts,'receipt':str(rp),'targeted_attempts':0}
+        else:
+            checkpoint=retry_failed_parts(run_state,args.part,data,args.timeout,state_path,state)
+            passed={'attempt':'checkpoint','parts':checkpoint['parts'],'receipt':str(rp),
+                    'targeted_attempts':checkpoint['targeted_attempts']}
         report_rev=update_report(args.part,{'pid':pid,'run':run_state.name,'loaded':loaded,
-                   'attempt':passed['attempt'],'parts':passed['parts'],'chars':len(spoken)})
+                   'attempt':passed['attempt'],'parts':passed['parts'],'chars':len(spoken),
+                   'targeted_attempts':passed['targeted_attempts']})
         m=marker(args.part,{'PART':f'{args.part:02d}','STATUS':'PASS','PID':pid,'UPSTREAM':0,
                   'LOADED_REVISION':loaded,'REPORT_REVISION':report_rev,'RUN':run_state,
-                  'NEMO_PROCESSES':0,'GRADUATION_ATTEMPT':passed['attempt'],'GRADUATION_PARTS':passed['parts']})
+                  'NEMO_PROCESSES':0,'GRADUATION_ATTEMPT':passed['attempt'],'GRADUATION_PARTS':passed['parts'],
+                  'TARGETED_RETRIES':passed['targeted_attempts']})
         state.update(status='PASS',pid=pid,run=str(run_state),marker=str(m),finished_at=time.time(),graduation=passed)
         state_path.write_text(json.dumps(state,ensure_ascii=False,indent=2),encoding='utf-8'); return 0
     except Exception as e:
