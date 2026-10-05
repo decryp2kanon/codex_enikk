@@ -845,9 +845,11 @@ def open_tts_debug_window(state):
         return
     log = Path(state) / 'runtime.log'
     log.touch(exist_ok=True)
+    events = Path(state) / 'notify.log'
+    events.touch(exist_ok=True)
     try:
         subprocess.Popen([terminal, '--window', '--title=Yuki TTS debug', '--',
-                          'tail', '-n', '80', '-F', '--pid=' + str(os.getpid()), str(log)],
+                          'tail', '-n', '80', '-F', '--pid=' + str(os.getpid()), str(log), str(events)],
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL, close_fds=True, start_new_session=True)
     except OSError as exc:

@@ -13,7 +13,7 @@ class TTSDebugTests(unittest.TestCase):
             with patch.dict(os.environ, {'DISPLAY': ':0'}), patch.object(enikk.shutil, 'which', return_value='/usr/bin/gnome-terminal'), patch.object(enikk.subprocess, 'Popen') as spawn:
                 enikk.open_tts_debug_window(d)
             argv = spawn.call_args.args[0]
-            self.assertEqual(argv[-1], str(Path(d) / 'runtime.log'))
+            self.assertEqual(argv[-2:], [str(Path(d) / 'runtime.log'), str(Path(d) / 'notify.log')])
             self.assertIn('--window', argv)
             self.assertIn('--pid=' + str(os.getpid()), argv)
             self.assertEqual(argv[argv.index('--') + 1], 'tail')
