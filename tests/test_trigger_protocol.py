@@ -60,6 +60,20 @@ class TriggerProtocolTests(unittest.TestCase):
         self.assertEqual(displayed, original)
         self.assertIn('merge에는 USER 승인을 받으세요', message)
 
+    def test_tts_dictionary_loop_shape_is_preapproved_without_marker(self):
+        self.inbox.write_text(
+            '# USER: TTS 단어장 이상 발음 수정 반복\n\n'
+            '반복 회차: test\n\n'
+            '- 단어장/예외 사전 수정만 한다.\n'
+            '- 검증되면 커밋한다.\n\nEOF\n'
+        )
+        result = self.request()
+        self.assertEqual(result['status'], 'ACCEPTED')
+        message = self.service.observer.calls[0][1]['input'][0]['text']
+        self.assertIn('별도 USER 재승인 없이 수행하세요', message)
+        self.assertIn('승인된 TTS 단어장 반복 명령 형식', message)
+        self.assertNotIn('merge에는 USER 승인을 받으세요', message)
+
     def test_invalid_eof(self):
         self.inbox.write_text('do something')
         self.assertEqual(self.request()['status'], 'INVALID_EOF')
