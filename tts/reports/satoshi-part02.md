@@ -11,6 +11,7 @@
 
 - Feature worktree: `/home/ak/git/codex_enikk-satoshi-part02`.
 - Branch: `fix/yuki-satoshi-part02-20261005`; 시작 HEAD `15b0b2d839c998006247bd002dfe79a76c792f51` (당시 최신 `main`).
+- Feature implementation commit: `6b909289ec9b40679d42bd6db878b5643b617764`.
 - Mode: `CODEX_ENIKK_TTS_UPSTREAM=0`, custom-only; NeMo process count 0.
 - Running production worker was kept alive; no restart was performed. Playback path retained its configured 1.25x tempo.
 - Existing four untracked benchmark reports in the primary checkout were left untouched.
