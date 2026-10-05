@@ -124,6 +124,13 @@ class WorkerNormalizationFailureTests(unittest.TestCase):
                 ready.put(None)
 
 class ExceptionBoundaryTests(unittest.TestCase):
+    def test_large_item_count_boundaries(self):
+        pattern = tn.overrides.LARGE_ITEM_COUNT
+        self.assertIsNotNone(pattern.search('284개를 확인한다.'))
+        for text in ['28개', '0.284개', '-284개', '+284개', 'A284개',
+                     'id_284개', '284개.txt', '/284개', '284개API']:
+            self.assertIsNone(pattern.search(text), text)
+
     def test_su_eopseo_protection_excludes_other_contexts(self):
         pattern = tn.overrides.SU_EOPSEO_PHRASE
         self.assertIsNotNone(pattern.search('원인으로 단정할 수 없어.'))
@@ -196,6 +203,12 @@ class ExceptionBoundaryTests(unittest.TestCase):
 
 @unittest.skipUnless((Path.home() / 'Apps/enikk-nemo-tn/.venv/bin/python').is_file(), 'isolated NeMo unavailable')
 class KnownErrorIntegrationTests(unittest.TestCase):
+    def test_large_item_counts_keep_numeric_value(self):
+        for text, expected in [('282개', '이백팔십이 개'),
+                               ('284개', '이백팔십사 개'),
+                               ('1,024개', '천이십사 개')]:
+            self.assertEqual(self.client.normalize(text), expected)
+
     def test_su_eopseo_is_not_wednesday(self):
         text = '길이나 영문 혼합만 원인으로 단정할 수 없어.'
         self.assertEqual(self.client.normalize(text), text)
