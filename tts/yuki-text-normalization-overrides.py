@@ -55,6 +55,10 @@ SU_ITTOROK_PHRASE = re.compile(r'(?<![\w/@-])수 있도록(?!\w|\.[A-Za-z0-9_])'
 SU_EOPSEO_PHRASE = re.compile(r'(?<![\w/@-])수 없어(?!\w|\.[A-Za-z0-9_])')
 # Both reproduced in runtime: "설치할 수 있으므로", "섞일 수 있어".
 SU_ISSEO_PHRASE = re.compile(r'(?<![\w/@-])수 (?:있으므로|있어)(?!\w|\.[A-Za-z0-9_])')
+# Deep-audit fixtures reproduced weekday substitution in these exact forms.
+AUDITED_NOUN_PHRASE = re.compile(
+    r'(?<![\w/@-])(?:수 (?:있습니다|없어요|없어서|있는|있다)|일 하나를)'
+    r'(?!\w|\.[A-Za-z0-9_])')
 
 
 # Explicit USER listening failures only; not a general English or letter dictionary.
@@ -104,6 +108,7 @@ def normalize_with_exceptions(text, normalize):
     text = SU_ITTOROK_PHRASE.sub(lambda match: protect(match.group()), text)
     text = SU_EOPSEO_PHRASE.sub(lambda match: protect(match.group()), text)
     text = SU_ISSEO_PHRASE.sub(lambda match: protect(match.group()), text)
+    text = AUDITED_NOUN_PHRASE.sub(lambda match: protect(match.group()), text)
     text = SINGLE_HOUR.sub(lambda match: protect('한 시간'), text)
     text = KNOWN_PROTECTED.sub(lambda match: protect(match.group()), text)
     # Strip commas only from syntactically valid thousands groups, not prose commas.

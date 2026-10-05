@@ -124,6 +124,13 @@ class WorkerNormalizationFailureTests(unittest.TestCase):
                 ready.put(None)
 
 class ExceptionBoundaryTests(unittest.TestCase):
+    def test_audited_nouns_exclude_weekdays_and_identifiers(self):
+        pattern = tn.overrides.AUDITED_NOUN_PHRASE
+        for text in ['수요일 있습니다', '일요일 하나', '가수 있습니다',
+                     '할일 하나', '수 있습니다.py', '/수 없다', '@수 있는',
+                     '수 있다는', '수 없어요.txt', '일 하나둘', '수 있었어요']:
+            self.assertIsNone(pattern.search(text), text)
+
     def test_su_isseo_protection_has_narrow_boundaries(self):
         pattern = tn.overrides.SU_ISSEO_PHRASE
         for text in ['설치할 수 있으므로 중단한다.', '변경이 섞일 수 있어.']:
@@ -219,6 +226,13 @@ class ExceptionBoundaryTests(unittest.TestCase):
 
 @unittest.skipUnless((Path.home() / 'Apps/enikk-nemo-tn/.venv/bin/python').is_file(), 'isolated NeMo unavailable')
 class KnownErrorIntegrationTests(unittest.TestCase):
+    def test_audited_nouns_do_not_become_weekdays(self):
+        for text in ['확인할 수 있습니다.', '확인할 수 없어요.',
+                     '확인할 수 없어서 중단합니다.', '확인할 수 있는 상태입니다.',
+                     '확인할 수 있다.', '일 하나를 끝냅니다.']:
+            with self.subTest(text=text):
+                self.assertEqual(self.client.normalize(text), text)
+
     def test_confirmed_ability_phrases_are_not_weekdays(self):
         for text in ['변경까지 설치할 수 있으므로 중단할게.', '변경이 섞일 수 있어.']:
             self.assertEqual(self.client.normalize(text), text)
