@@ -60,3 +60,17 @@
 - Status: `PARTIAL_PASS_RESTART_GRADUATION_PENDING`; `RESTART_REQUIRED=true`. Dorothy should restart normally, verify ready/UPSTREAM=0/NeMo=0, perform the one ordered graduation read using the installed candidate, verify 0 failed/missing/duplicate/out-of-order segments, and only then create `part02-production-verified`. No later Part may start before that marker exists.
 - Rollback: use a normal `git revert` of the implementation commit if the post-restart graduation reveals an unwanted transformation; no runtime or model setting changed.
 - Four primary-checkout benchmark reports remain untouched.
+
+## Automated production graduation
+
+- Status: PASS
+- Production wrapper PID: 3579981
+- Production run: run-z62welm3
+- Loaded code revision before report finalization: 54509b963fb3fd69ecef14c41cf7e015bf99c9dd
+- CODEX_ENIKK_TTS_UPSTREAM=0: confirmed
+- NeMo process count: 0
+- Graduation attempt: checkpoint
+- Graduation receipt parts: 39 accounted as PLAYED; final failures 0
+- Targeted checkpoint retries: 47
+- Graduation cleaned characters: 1225
+- Production ready observed automatically after restart.
