@@ -43,7 +43,7 @@
 - 시작 기준 main/origin: `a26223203bc12851e60d8c834965069f8d47e38c`.
 - production source/install, TTS worker, Enikk process/session은 변경하거나 재시작하지 않았다.
 - production 5% gate는 normalization-only paired 결과에서 통과한다. 전체 gate는 반영 후 실제 TTS P benchmark까지 측정한 뒤 판정한다.
-- commit 및 main/push/production update는 아직 하지 않았다. 교육 코드와 테스트는 feature worktree에 보존했다.
+- 교육 코드·테스트·보고서는 feature worktree의 local commit으로 보존했다. main 반영, push, production update/restart는 아직 하지 않았다.
 
 
 EOF
