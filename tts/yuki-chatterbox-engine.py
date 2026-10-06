@@ -197,7 +197,7 @@ def retire_alignment_hooks(model):
 
 
 class GenerationWarnings(logging.Handler):
-    """Capture analyzer signals; token repetition alone remains informational."""
+    """Capture signals; long-tail and token repetition remain informational."""
     def __init__(self):
         super().__init__()
         self.reason = None
@@ -210,9 +210,7 @@ class GenerationWarnings(logging.Handler):
                 self.signals.add(name)
         if "forcing EOS" in message:
             self.signals.add("forced_eos")
-        if "long_tail" in self.signals:
-            self.reason = "internal_long_tail"
-        elif "alignment_repetition" in self.signals:
+        if "alignment_repetition" in self.signals:
             self.reason = "internal_alignment_repetition"
 
 
@@ -233,6 +231,103 @@ def trim_edge_silence(wav, sample_rate):
     leading = start / sample_rate
     trailing = (mono.numel() - end) / sample_rate
     return wav[..., start:end], leading, trailing
+
+
+def soften_detached_tail(wav, sample_rate, completed_seconds):
+    """Experimental stronger attenuation after a final-region quiet gap.
+
+    Completion is only a lower-bound hint, not a word-end guarantee. Never
+    shorten audio, change the prefix, or infer a boundary from low energy alone.
+    """
+    if sample_rate <= 0 or completed_seconds is None:
+        return wav, {'reason': 'no_completion_hint'}
+    total = wav.shape[-1]
+    if not 0 <= completed_seconds < total / sample_rate:
+        return wav, {'reason': 'invalid_completion_hint'}
+    frame = max(1, round(sample_rate * .02))
+    begin = max(0, total - round(sample_rate * 2.5))
+    mono = wav[..., begin:].detach().float()
+    if mono.ndim > 1:
+        mono = mono.mean(dim=0)
+    count = mono.numel() // frame
+    if count < 20:
+        return wav, {'reason': 'short_tail_window'}
+    blocks = mono[:count * frame].reshape(count, frame)
+    rms = blocks.square().mean(dim=1).sqrt().tolist()
+    peaks = blocks.abs().amax(dim=1).tolist()
+    quiet = [r <= .003 and p <= .02 for r, p in zip(rms, peaks)]
+    runs = []
+    start = None
+    for i, is_quiet in enumerate(quiet + [False]):
+        if is_quiet and start is None:
+            start = i
+        elif not is_quiet and start is not None:
+            if i - start >= 3:
+                runs.append((start, i))
+            start = None
+    skips = {'before_completion_hint': 0, 'extended_activity': 0,
+             'strong_resumption': 0, 'unframed_activity': 0}
+    for gap_start, gap_end in runs:
+        # Allow a gap overlapping the final-text hint; the user-selected 170ms
+        # advance below is experimental and can overlap the last spoken word.
+        gap_sample = begin + gap_start * frame
+        if (begin + gap_end * frame) / sample_rate < completed_seconds:
+            skips['before_completion_hint'] += 1
+            continue
+        active = [i for i in range(gap_end, count) if not quiet[i]]
+        if not active or (active[-1] - active[0] + 1) * frame > sample_rate * 1.8:
+            skips['extended_activity'] += 1
+            continue
+        reference = max(rms[max(0, gap_start - 20):gap_start], default=0.)
+        if reference < .004 or max(rms[i] for i in active) > min(.04, reference * 1.25):
+            skips['strong_resumption'] += 1
+            continue
+        # Also reject a long burst hidden in the unframed remainder.
+        if mono[count * frame:].numel() and mono[count * frame:].abs().max().item() > .02:
+            skips['unframed_activity'] += 1
+            continue
+        cut = max(gap_sample + round(sample_rate * .12),
+                  round((completed_seconds + .12) * sample_rate))
+        # Listening-selected advance, applied only to accepted tail candidates.
+        cut = max(0, cut - round(sample_rate * .170))
+        if cut >= total:
+            continue
+        result = wav.clone()
+        gain = torch.full((total - cut,), .001, dtype=result.dtype, device=result.device)
+        ramp = min(round(sample_rate * .02), gain.numel())
+        gain[:ramp] = torch.linspace(1., .001, ramp, dtype=result.dtype, device=result.device)
+        result[..., cut:] *= gain
+        return result, {'reason': 'detached_tail_after_quiet_gap',
+                        'start_seconds': cut / sample_rate, 'attenuation_db': 60,
+                        'advance_seconds': .170,
+                        'completion_hint_seconds': completed_seconds,
+                        'quiet_gap_seconds': (gap_end - gap_start) * frame / sample_rate}
+    return wav, {'reason': 'ambiguous_or_no_detached_tail',
+                 'completion_hint_seconds': completed_seconds, 'skip_counts': skips}
+
+
+def optional_tail_softening(wav, sample_rate, model, warnings, leading, trace):
+    """Fail open to original audio; diagnostic processing never causes retry."""
+    if 'long_tail' not in warnings.signals:
+        return wav
+    trace('long_tail_detected')
+    started = time.monotonic()
+    try:
+        analyzer = getattr(getattr(getattr(model, 't3', None), 'patched_model', None),
+                           'alignment_stream_analyzer', None)
+        frame = getattr(analyzer, 'completed_at', None)
+        if analyzer is None or not getattr(analyzer, 'complete', False) or frame is None:
+            completed = None
+        else:
+            # Installed multilingual S3 tokenizer uses 25Hz speech tokens.
+            completed = max(0., float(frame) / 25. - leading)
+        processed, record = soften_detached_tail(wav, sample_rate, completed)
+        event = 'tail_trim_applied' if processed is not wav else 'tail_trim_skipped'
+        trace(f'{event} processing_seconds={time.monotonic()-started:.6f} {record!r}')
+        return processed
+    except Exception as exc:
+        trace(f'tail_trim_skipped reason=processing_exception error={type(exc).__name__}')
+        return wav
 
 
 def korean_pronunciation(text):
@@ -285,6 +380,7 @@ class DeliveryJob:
         self.parts = delivery["parts"]
         self.terminal = delivery["terminal"]
         self.complete = False
+        self.long_tail_parts = set()
         self._save()
         self._cleanup_if_complete()
 
@@ -415,6 +511,8 @@ def playback(ready):
             if number == 0:
                 log(f"Chatterbox first audio latency {(time.monotonic_ns()-queued_ns)/1e9:.3f}s job={job_id}")
             status = play_audio(job, path)
+            if status == 'played' and number in getattr(job, 'long_tail_parts', set()):
+                log(f"Chatterbox long_tail_detected_but_played job={job_id} part={number}")
         except Exception as exc:
             failure_reason = f"{type(exc).__name__}: {exc}"
             # An item failure must not terminate the queue consumer.
@@ -600,6 +698,9 @@ def run():
                                 except Exception as exc:
                                     trace(f"rejected_audio_diagnostic_failed error={type(exc).__name__}")
                             return None, reason
+                        wav = optional_tail_softening(wav, model.sr, model, warnings, leading, trace)
+                        if 'long_tail' in warnings.signals:
+                            job.long_tail_parts.add(number)
                         return (wav, duration), None
 
                     accepted, last_failure = recover_generation(

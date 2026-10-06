@@ -28,6 +28,7 @@ _override_spec.loader.exec_module(overrides)
 def definitions():
     tree = ast.parse(SOURCE.read_text())
     names = {'DeliveryJob', 'playback', 'play_audio', 'run', 'GenerationWarnings', 'retire_alignment_hooks',
+             'soften_detached_tail', 'optional_tail_softening',
              'sentences', 'speech_chunks', 'segment_drop_reason', 'recovery_clauses', 'recover_generation',
              'normalize_paths', 'korean_pronunciation',
              'owner_alive', 'discard_stale_job'}
@@ -262,8 +263,10 @@ class RecoveryTests(unittest.TestCase):
         emit('forcing EOS token, long_tail=False, alignment_repetition=False, token_repetition=True')
         self.assertIsNone(capture.reason)
         emit('forcing EOS token, long_tail=tensor(True), alignment_repetition=tensor(False), token_repetition=False')
-        self.assertEqual(capture.reason, 'internal_long_tail')
+        self.assertIsNone(capture.reason)
         self.assertEqual(capture.signals, {'token_repetition', 'long_tail', 'forced_eos'})
+        emit('forcing EOS token, long_tail=True, alignment_repetition=True, token_repetition=False')
+        self.assertEqual(capture.reason, 'internal_alignment_repetition')
 
 
 class AnalyzerLifecycleTests(unittest.TestCase):

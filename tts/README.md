@@ -52,7 +52,10 @@ See [the complete lifecycle and IPC contract](../docs/tts-separation.md).
 ### Bounded Chatterbox recovery
 
 Normal chunks retain the existing scheduler, SUPER-CLEAN C2 parameters, numeric
-pronunciation and audio guards. Two internal long-tail rejections of the same
+pronunciation and waveform guards. Internal long-tail signals are informational:
+they are logged but do not reject an otherwise accepted waveform or trigger retry.
+Alignment repetition, generation exceptions and waveform rejection still use
+their existing failure policy. Legacy recovery supports two internal long-tail rejections of the same
 chunk permit one split into two clauses at complete word boundaries. Punctuation,
 URLs, filenames, numbers and technical tokens are not cut or discarded. Original
 and recovery whitespace-token sequences must match exactly. Each clause has at
@@ -68,10 +71,34 @@ these are **not** successful delivery and are not retried forever.
 
 Diagnostics distinguish internal long-tail/alignment warnings from waveform guard
 rejections and record monotonic generation/reset/playback timings. Token repetition
-alone is informational. `CODEX_ENIKK_TTS_REJECT_DIR` optionally retains up to 24
+and internal long-tail alone are informational. `CODEX_ENIKK_TTS_REJECT_DIR` optionally retains up to 24
 rejected WAVs for diagnosis; use a private directory outside the repository.
 Rejected audio is never queued. A passed waveform check alone does not establish
 that an internal analyzer warning is a false positive.
+
+Experimental detached-tail attenuation applies only after accepted generation
+with a long-tail warning. The existing analyzer's completion frame supplies only
+a lower-bound hint (25Hz S3 tokens), not an exact spoken-word endpoint. Only the
+last 2.5 seconds are inspected: a quiet gap of at least 60ms followed by weak
+activity spanning at most 1.8s, whose frame RMS is at most 125% of the preceding
+local speech RMS peak and at most 0.04, may be attenuated by 60dB. Quiet-frame
+RMS must be at most 0.003 and peak at most 0.02. The initial boundary is 120ms after the gap start or completion hint, whichever
+is later. Following user listening comparisons, attenuation starts 170ms earlier
+than that initial boundary (clamped at zero). This intentionally relaxes the
+previous speech padding and may attenuate a final syllable on other inputs. Quiet gaps overlapping
+the completion hint are eligible too; gaps ending before it remain protected.
+A 20ms gain ramp avoids
+abrupt boundaries. Candidates are examined in chronological order to catch the
+earlier onset of repeated tail bursts. This stronger setting was explicitly
+requested for listening feedback and increases the risk of false detection. No samples
+are removed, so duration and queue timing are preserved. Ambiguous boundaries,
+missing analyzer information and processing exceptions preserve the original.
+This heuristic can miss noise or mistake a quiet final word for noise; it is
+an experimental setting for listening feedback, not a validated speech/noise
+classifier. Existing waveform/alignment guards run before attenuation. Ordinary
+generation without a long-tail warning does not run the detector. Diagnostics
+record `tail_trim_applied`, `tail_trim_skipped`, and actual successful playback
+as `long_tail_detected_but_played`.
 
 ### Release status
 
