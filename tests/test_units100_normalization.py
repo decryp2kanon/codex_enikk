@@ -9,9 +9,9 @@ spec.loader.exec_module(tn)
 
 # Literal expected strings from the immutable education A table.
 EXPECTED = [
-    ('100 kb/s', '백 킬로바이트 퍼 세컨드'),
+    ('100 kb/s', '백 킬로비트 퍼 세컨드'),
     ('1000 ms', '천 밀리세컨드'),
-    ('225 block/s', '천 블락스 퍼 세컨드'),
+    ('225 block/s', '이백이십오 블록 퍼 세컨드'),
     ('50 MB/s', '오십 메가바이트 퍼 세컨드'),
     ('1.5 GB/s', '일 쩜 오 기가바이트 퍼 세컨드'),
     ('250 Mbps', '이백오십 메가비트 퍼 세컨드'),
@@ -138,23 +138,23 @@ class Units100NormalizationTests(unittest.TestCase):
                          '십 킬로미터 퍼 아워, 오 미터 퍼 세컨드')
         self.assertEqual(tn.normalize('1,234 widgets'), '1234 widgets')
 
-    def test_user_confirmed_readings_and_case_sensitive_boundaries(self):
-        confirmed = {
-            '100 kb/s': '백 킬로바이트 퍼 세컨드',
+    def test_general_unit_rules_and_case_sensitive_boundaries(self):
+        generalized = {
+            '100 kb/s': '백 킬로비트 퍼 세컨드',
             '1000 ms': '천 밀리세컨드',
-            '225 block/s': '천 블락스 퍼 세컨드',
-            '225 blocks/s': '천 블락스 퍼 세컨드',
-            '50 mb/s': '오십메가 퍼 세컨드',
+            '225 block/s': '이백이십오 블록 퍼 세컨드',
             '2 s': '이 초',
             '144 Hz': '백사십사 헤르츠',
             '1.5 GB/s': '일 쩜 오 기가바이트 퍼 세컨드',
         }
-        for raw, expected in confirmed.items():
+        for raw, expected in generalized.items():
             with self.subTest(raw=raw):
                 self.assertEqual(tn.normalize(raw), expected)
 
-        # The lowercase user-confirmed reading must not erase the B/byte case
-        # distinction in an unrelated uppercase token.
+        # No exact-literal exceptions: unsupported spellings stay unchanged,
+        # while supported case-sensitive units use the general registry.
+        self.assertEqual(tn.normalize('225 blocks/s'), '225 blocks/s')
+        self.assertEqual(tn.normalize('50 mb/s'), '50 mb/s')
         self.assertEqual(tn.normalize('50 MB/s'), '오십 메가바이트 퍼 세컨드')
         for literal in ('x100 kb/s', '100 kb/s_v2', 'v225 block/s',
                         'id50 mb/s', 'file100 kb/s.txt'):

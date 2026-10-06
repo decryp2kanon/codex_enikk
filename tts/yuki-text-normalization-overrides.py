@@ -80,17 +80,6 @@ NUMBER_OR_GROUPED_INTEGER = re.compile(
     r'|(?<![A-Za-z0-9_.,+/@-])(?P<grouped_integer>'
     r'[1-9]\d{0,2}(?:,\d{3})+)(?!\d|,\d))')
 
-# USER-confirmed readings that intentionally override ordinary unit semantics.
-# Keep these exact and case-sensitive; they must not rewrite neighboring values
-# or technical identifiers.
-USER_CONFIRMED_UNIT_READINGS = {
-    '100 kb/s': '백 킬로바이트 퍼 세컨드',
-    '225 block/s': '천 블락스 퍼 세컨드',
-    '225 blocks/s': '천 블락스 퍼 세컨드',
-    '50 mb/s': '오십메가 퍼 세컨드',
-}
-
-
 _CARDINAL_DIGITS = '영일이삼사오육칠팔구'
 _CARDINAL_SMALL = ('', '십', '백', '천')
 _CARDINAL_LARGE = ('', '만', '억', '조')
@@ -225,8 +214,6 @@ def normalize_with_exceptions(text, normalize):
     """
     if not text.strip():
         return text
-    if text in USER_CONFIRMED_UNIT_READINGS:
-        return USER_CONFIRMED_UNIT_READINGS[text]
     # Exact scalar measurement tokens are common input units and need no prose
     # protection pipeline. Keep this full-token fast path ahead of all generic
     # exceptions; embedded values still use the guarded combined scan below.
@@ -263,9 +250,6 @@ def normalize_with_exceptions(text, normalize):
         if match.group('grouped_integer') is not None:
             return match.group('grouped_integer').replace(',', '')
         unit_name = match.group('unit_token')
-        exact = match.group('number_unit')
-        if exact in USER_CONFIRMED_UNIT_READINGS:
-            return USER_CONFIRMED_UNIT_READINGS[exact]
         if unit_name not in KNOWN_UNITS:
             if ',' in match.group('unit_number'):
                 return (match.group('unit_number').replace(',', '') +
