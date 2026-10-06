@@ -218,6 +218,31 @@ def function_reading(token):
     return None
 
 
+# 작성자: 에닉(유키짱)
+# Reuse verified roots; duplicate lexical entries never replace prior readings.
+CODEX_ROOTS = dict(item.split('=', 1) for item in '''
+codex=코덱스 agent=에이전트 assistant=어시스턴트 user=유저 prompt=프롬프트 response=리스폰스 reasoning=리즈닝 instruction=인스트럭션
+system=시스템 developer=디벨로퍼 turn=턴 session=세션 conversation=컨버세이션 history=히스토리 memory=메모리 token=토큰
+model=모델 tool=툴 function=펑션 call=콜 command=커맨드 shell=셸 terminal=터미널 process=프로세스
+runtime=런타임 environment=인바이런먼트 workspace=워크스페이스 directory=디렉터리 patch=패치 apply=어플라이 edit=에디트 write=라이트
+read=리드 search=서치 test=테스트 build=빌드 lint=린트 format=포맷 validation=밸리데이션 success=석세스
+failed=페일드 failure=페일러 warning=워닝 retry=리트라이 timeout=타임아웃 cancel=캔슬 interrupt=인터럽트 resume=리줌
+continue=컨티뉴 start=스타트 stop=스톱 complete=컴플리트 completed=컴플리티드 pending=펜딩 queued=큐드 running=러닝
+ready=레디 active=액티브 inactive=인액티브 approval=어프루벌 approved=어프루브드 permission=퍼미션 sandbox=샌드박스 restricted=리스트릭티드
+unrestricted=언리스트릭티드 configuration=컨피규레이션 argument=아규먼트 parameter=파라미터 option=옵션 flag=플래그 endpoint=엔드포인트 snapshot=스냅샷
+reconcile=레컨사일 fallback=폴백 planner=플래너 plan=플랜 task=태스크 subtask=서브태스크 handoff=핸드오프 delegate=델리게이트
+delegation=델리게이션 executor=엑시큐터 execution=엑시큐션 invoke=인보크 invocation=인보케이션 item=아이템 result=리절트 analysis=애널리시스
+commentary=코멘터리 final=파이널 summary=서머리 rollback=롤백 point=포인트 attachment=어태치먼트 connector=커넥터 plugin=플러그인
+capability=케이퍼빌리티 schema=스키마 payload=페이로드
+'''.split())
+for _word, _reading in CODEX_ROOTS.items():
+    TECH_ROOTS.setdefault(_word, _reading)
+# Bounded status-label grammar; arbitrary snake_case identifiers stay opaque.
+CODEX_LABEL_PREFIXES = ('apply', 'response', 'tool', 'rollback')
+CODEX_LABEL_SUFFIXES = ('patch', 'item', 'call', 'result', 'point')
+CODEX_LABELS = {prefix + '_' + suffix: TECH_ROOTS[prefix] + ' ' + TECH_ROOTS[suffix]
+                for prefix in CODEX_LABEL_PREFIXES for suffix in CODEX_LABEL_SUFFIXES}
+
 LETTER_NAMES = dict(zip('abcdefghijklmnopqrstuvwxyz',
     '에이 비 씨 디 이 에프 지 에이치 아이 제이 케이 엘 엠 엔 오 피 큐 알 에스 티 유 브이 더블유 엑스 와이 지'.split()))
 TECH_ABBREVIATIONS = frozenset('''
@@ -241,10 +266,13 @@ TECH_PROSE_TOKEN = re.compile(r'```[\s\S]*?```|`[^`]*`|\S+')
 TECH_ASCII = re.compile('[A-Za-z]')
 CODE_LITERAL = re.compile(r'```[\s\S]*?(?:```|$)|`[^`]*(?:`|$)')
 CUSTOM_TRANSFORM_INPUT = re.compile(r'[A-Za-z\d]')
-TECH_WITH_PARTICLE = re.compile(r'([A-Za-z][A-Za-z-]*)(에서도|에서는|으로|에서|에게|은|는|이|가|을|를|의|에|로|와|과|도)')
+TECH_WITH_PARTICLE = re.compile(r'([A-Za-z][A-Za-z_-]*)(에서도|에서는|으로|에서|에게|은|는|이|가|을|를|의|에|로|와|과|도)')
 
 
-PROSE_READINGS = {**TECH_ROOTS, **FUNCTION_WORDS}
+PROSE_READINGS = {**TECH_ROOTS, **FUNCTION_WORDS, **CODEX_LABELS}
+CODEX_PROSE_READINGS = {word.title(): TECH_ROOTS[word] for word in CODEX_ROOTS}
+CODEX_PROSE_READINGS.update(CODEX_LABELS)
+PROSE_READINGS.update(CODEX_PROSE_READINGS)
 PROSE_READINGS.update({word.title(): reading for word, reading in FUNCTION_WORDS.items()
                        if len(word) > 1})
 
@@ -266,12 +294,12 @@ def lexical_reading(token):
     for suffix in ('es', 's'):
         if token.endswith(suffix):
             stem = token[:-len(suffix)]
-            if stem in TECH_ROOTS or stem in TECH_COMPONENTS or stem in TECH_ABBREVIATIONS:
+            if stem in TECH_ROOTS or stem in CODEX_PROSE_READINGS or stem in TECH_COMPONENTS or stem in TECH_ABBREVIATIONS:
                 return lexical_reading(stem) + '스'
     particle = TECH_WITH_PARTICLE.fullmatch(token)
     if particle:
         stem, ending = particle.groups()
-        if stem in TECH_ROOTS or stem in TECH_COMPONENTS or stem in TECH_ABBREVIATIONS or stem in TECH_COMPOUNDS or stem == 'HEAD' or function_reading(stem) is not None:
+        if stem in PROSE_READINGS or stem in TECH_COMPONENTS or stem in TECH_ABBREVIATIONS or stem in TECH_COMPOUNDS or stem == 'HEAD':
             return lexical_reading(stem) + ending
     return None
 
