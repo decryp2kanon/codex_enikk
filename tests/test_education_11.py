@@ -47,15 +47,31 @@ class HashReadingTests(unittest.TestCase):
     def test_anchor_scope(self):
         for anchor in ('hash','commit','SHA','SHA1','SHA-1','SHA256','SHA-256',
                        'digest','checksum','release','revision','rev','COMMIT',
-                       'commit hash','release hash','SHA hash','checksum hash'):
+                       'commit hash','release hash','SHA hash','checksum hash',
+                       'hash:', 'release:', '커밋:'):
             self.assertIn('총길이 십 글자', tn.normalize(anchor+' deadbeef12'))
         for raw in ('release candidate is ready and cafe1234 is selected',
                     'commit completed and deadbeef is a project name',
                     'commit\ndeadbeef12','hash\rdeadbeef12','myhash deadbeef12',
-                    'hash=deadbeef12','hash: deadbeef12'):
+                    'hash=deadbeef12'):
             with self.subTest(raw=raw):
                 self.assertNotIn('로 시작하는 해시',tn.normalize(raw))
         self.assertIn('총길이 십 글자!', tn.normalize('hash deadbeef12!'))
+
+    def test_labeled_inline_hashes_and_preserved_code(self):
+        for label in ('commit', 'release:', 'hash:', '커밋:', 'TTS release:'):
+            for value in ('a1b2c3d', 'abcdef1234567890', 'aBcD091e'*5):
+                raw = label+' `'+value+'`'
+                self.assertEqual(tn.normalize(notify.clean_text(raw)),
+                                 tn.normalize(label+' '+value))
+        for raw in ('release: `abcdef`', 'release: `12345678`',
+                    'release:\n`abcdef1234567890`',
+                    'release candidate `abcdef1234567890`',
+                    'release: `git show abcdef1234567890`',
+                    'release: `HASH=abcdef1234567890`',
+                    'release: ```\nabcdef1234567890\n```',
+                    '/tmp/release: `abcdef1234567890`'):
+            self.assertNotIn('시작하는 해시', tn.normalize(raw))
 
     def test_machine_boundaries(self):
         value = '4acb675fbe30fe1f99e0e4c1a6b4ea45ba62d29f'

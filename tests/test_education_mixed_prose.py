@@ -4,6 +4,15 @@ from test_education_2_7 import tn
 
 
 class MixedProseTests(unittest.TestCase):
+    def test_middle_dot_lists_are_lexical_prose_not_machine_paths(self):
+        self.assertEqual(tn.normalize('코드 블록·명령어·URL·경로 보호는 유지한다.'),
+                         '코드 블록·명령어·유알엘·경로 보호는 유지한다.')
+        self.assertEqual(tn.normalize('response_item·tool_call·tool_result'),
+                         '리스폰스 아이템·툴 콜·툴 리절트')
+        for raw in ('`URL·UUID`', '/tmp/URL·UUID', 'https://example.com/URL·UUID',
+                    'URL·UUID.txt', 'x=URL·UUID'):
+            self.assertEqual(tn.normalize(raw), raw)
+
     def test_url_uuid_names_without_changing_machine_boundaries(self):
         self.assertEqual(tn.normalize('URL과 UUID는'), '유알엘과 유유아이디는')
         for raw in ('https://example.com/4acb675fbe30',

@@ -266,7 +266,11 @@ TECH_PROSE_TOKEN = re.compile(r'```[\s\S]*?```|`[^`]*`|\S+')
 TECH_ASCII = re.compile('[A-Za-z]')
 HASH_HEX = re.compile(r'[0-9a-fA-F]{7,}')
 HASH_ANCHORS = frozenset(('hash', 'commit', 'sha', 'sha1', 'sha-1', 'sha256',
-                         'sha-256', 'digest', 'checksum', 'release', 'revision', 'rev'))
+                         'sha-256', 'digest', 'checksum', 'release', 'revision', 'rev',
+                         '해시', '커밋', '릴리스', '리비전', '체크섬'))
+INLINE_HASH_LABEL = re.compile(
+    r'(?:^|[ \t])(?:' + '|'.join(re.escape(label) for label in sorted(HASH_ANCHORS)) +
+    r'):?[ \t]+$', re.IGNORECASE)
 HASH_NAMES = dict(zip('0123456789abcdef',
     ('제로', '원', '투', '쓰리', '포', '파이브', '식스', '세븐', '에이트', '나인',
      '에이', '비', '씨', '디', '이', '에프')))
@@ -284,6 +288,7 @@ PROSE_RATIO = re.compile(r'(\d{1,3}(?:,\d{3})+|\d+)/(\d{1,3}(?:,\d{3})+|\d+)(' +
 REFERENCE_ANCHORS = frozenset(('pr', 'issue', 'pull-request', '이슈'))
 PROSE_SPACE_ENTITY = re.compile(r'^(?:(?:&#32;|&#x20;|&nbsp;))+', re.IGNORECASE)
 SHA_ALGORITHM = re.compile(r'SHA-?([1-9][0-9]{0,3})(' + PROSE_PARTICLE + r')?', re.IGNORECASE)
+PROSE_DOT_LIST = re.compile(r'[A-Za-z가-힣][A-Za-z가-힣_-]*(?:·[A-Za-z가-힣][A-Za-z가-힣_-]*)+')
 UUID_TOKEN = re.compile(
     r'([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
     r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(' + PROSE_ENDING + r')?')
@@ -405,11 +410,14 @@ def technical_prose(text):
         raw = PROSE_SPACE_ENTITY.sub('', raw)
         anchored = previous in HASH_ANCHORS and '\n' not in text[previous_end:match.start()] and '\r' not in text[previous_end:match.start()]
         reference_context = previous in REFERENCE_ANCHORS and '\n' not in text[previous_end:match.start()] and '\r' not in text[previous_end:match.start()]
-        previous, previous_end = raw.lower(), match.end()
+        label = raw[:-1] if raw.endswith(':') else raw
+        previous, previous_end = label.lower(), match.end()
         if raw.startswith('`'):
             return raw
         token = raw.rstrip(',!?;')
         punctuation = raw[len(token):]
+        if token.endswith(':') and token[:-1].lower() in HASH_ANCHORS:
+            token, punctuation = token[:-1], ':' + punctuation
         if token.endswith('.') and (token.count('.') == 1 or token[:1].isdigit()):
             token, punctuation = token[:-1], '.' + punctuation
         particle = HASH_WITH_PARTICLE.fullmatch(token) if len(token) >= 8 else None
@@ -425,6 +433,8 @@ def technical_prose(text):
             reference = PROSE_REFERENCE.fullmatch(token)
             if reference:
                 reading = korean_cardinal(reference[1]) + ' 번' + (reference[2] or '')
+        if reading is None and '·' in token and PROSE_DOT_LIST.fullmatch(token):
+            reading = '·'.join(lexical_reading(part) or part for part in token.split('·'))
         return (reading or lexical_reading(token) or token) + punctuation
     return TECH_PROSE_TOKEN.sub(replace, text)
 # Relative filename tokens and the known digit-bearing extension remain identifiers.
@@ -664,7 +674,18 @@ def normalize_with_exceptions(text, normalize=None):
         return token
 
     if '`' in text:
-        text = CODE_LITERAL.sub(lambda match: protect(match.group()), text)
+        def protect_code(match):
+            raw = match.group()
+            # Only a single hex value directly following a prose hash label.
+            # Fences and inline commands/machine expressions remain opaque.
+            if raw.startswith('`') and not raw.startswith('``') and raw.endswith('`'):
+                value = raw[1:-1]
+                if len(value) >= 7 and INLINE_HASH_LABEL.search(text[max(0, match.start()-96):match.start()]):
+                    reading = hash_reading(value, anchored=True)
+                    if reading is not None:
+                        return protect(reading)
+            return protect(raw)
+        text = CODE_LITERAL.sub(protect_code, text)
     text = proper_names(text)
 
     text = WORK_NOUN_PHRASE.sub(lambda match: protect(match.group()), text)

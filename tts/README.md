@@ -167,6 +167,12 @@ Hash pronunciation accepts adjacent-anchor hex tokens from 7 characters;
 6 or fewer remain excluded. Standalone detection still requires 32 characters,
 and inline/fenced code and machine literals remain protected.
 
+Hash labels may end in a colon. A single hex value in inline backticks immediately
+after a hash label on the same line is treated as a displayed prose hash and read
+with the usual prefix/length policy. This also accepts Korean labels such as
+커밋 and 해시. Unlabeled inline hashes, inline commands, fenced code and other
+machine literals retain their protection. No literal hash value is registered.
+
 UUID values in prose have a separate full-token grammar for five hexadecimal
 groups of lengths 8, 4, 4, 4 and 12. Each character is spoken with the shared
 hex character names, with `대시` between groups. Case is ignored for speech;
