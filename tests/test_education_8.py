@@ -62,7 +62,7 @@ class FunctionWordsTests(unittest.TestCase):
                 raw = template.format(word)
                 with self.subTest(raw=raw):
                     self.assertEqual(tn.normalize(raw), raw)
-        for raw in ['v1.5', '192.168.0.1', 'a'*40, 'f'*64, 'another', 'theory',
+        for raw in ['v1.5', '192.168.0.1', '`'+'a'*40+'`', '`'+'f'*64+'`', 'another', 'theory',
                     'android', 'island', 'mustard', 'inside']:
             self.assertEqual(tn.normalize(raw), raw)
 

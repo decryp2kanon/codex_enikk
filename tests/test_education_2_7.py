@@ -133,7 +133,7 @@ class EducationTests(unittest.TestCase):
                  'https://example.com/?amount=1234', 'wallet@example.com',
                  'wallet_name', 'prefix-wallet', 'feature/wallet', 'wallet(node)',
                  'wallet=main', 'PATH', 'WALLET', '1'*40, '9'*64,
-                 '1234567890abcdef'*4, '`branch Python 123`',
+                 '`'+'1234567890abcdef'*4+'`', '`branch Python 123`',
                  '```bash\ngit log --oneline\n```', '`wallet', 'v2.3.4.json']
         for raw in fixed:
             with self.subTest(raw=raw):

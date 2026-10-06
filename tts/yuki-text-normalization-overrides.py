@@ -264,6 +264,23 @@ hostname=host+name wget=w+get gzip=g+zip gunzip=g+un+zip unzip=un+zip cmake=c+ma
 '''.split())
 TECH_PROSE_TOKEN = re.compile(r'```[\s\S]*?```|`[^`]*`|\S+')
 TECH_ASCII = re.compile('[A-Za-z]')
+HASH_HEX = re.compile(r'[0-9a-fA-F]{8,}')
+HASH_ANCHORS = frozenset(('hash', 'commit', 'sha', 'sha1', 'sha-1', 'sha256',
+                         'sha-256', 'digest', 'checksum', 'release', 'revision', 'rev'))
+HASH_NAMES = dict(zip('0123456789abcdef',
+    ('제로', '원', '투', '쓰리', '포', '파이브', '식스', '세븐', '에이트', '나인',
+     '에이', '비', '씨', '디', '이', '에프')))
+
+
+def hash_reading(token, anchored=False):
+    """Only a complete hex token; machine punctuation never enters this grammar."""
+    if len(token) < (8 if anchored else 32) or not HASH_HEX.fullmatch(token) or token.isdecimal():
+        return None
+    prefix = token[:7].lower()
+    particle = '으로' if prefix[-1] in '17' else '로'
+    return (' '.join(HASH_NAMES[c] for c in prefix) + particle +
+            ' 시작하는 해시고 총길이 ' + korean_cardinal(len(token)) + ' 글자')
+
 CODE_LITERAL = re.compile(r'```[\s\S]*?(?:```|$)|`[^`]*(?:`|$)')
 CUSTOM_TRANSFORM_INPUT = re.compile(r'[A-Za-z\d]')
 TECH_WITH_PARTICLE = re.compile(r'([A-Za-z][A-Za-z_-]*)(에서도|에서는|으로|에서|에게|은|는|이|가|을|를|의|에|로|와|과|도)')
@@ -309,15 +326,21 @@ def technical_prose(text):
     # embedded code delimiters never match a registered word.
     if not TECH_ASCII.search(text):
         return text
+    previous = None
+    previous_end = 0
     def replace(match):
+        nonlocal previous, previous_end
         raw = match.group()
+        anchored = previous in HASH_ANCHORS and '\n' not in text[previous_end:match.start()] and '\r' not in text[previous_end:match.start()]
+        previous, previous_end = raw.lower(), match.end()
         if raw.startswith('`'):
             return raw
         token = raw.rstrip(',!?;')
         punctuation = raw[len(token):]
         if token.endswith('.') and token.count('.') == 1:
             token, punctuation = token[:-1], '.' + punctuation
-        return (lexical_reading(token) or token) + punctuation
+        reading = hash_reading(token, anchored) if len(token) >= 8 else None
+        return (reading or lexical_reading(token) or token) + punctuation
     return TECH_PROSE_TOKEN.sub(replace, text)
 # Relative filename tokens and the known digit-bearing extension remain identifiers.
 # Absolute filesystem paths have already gone through the separate path-description layer.

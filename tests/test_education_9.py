@@ -58,7 +58,7 @@ class SymbolTests(unittest.TestCase):
 
     def test_literals(self):
         for raw in ['https://example.org/a?x=1&y=2','foo@example.org','/tmp/the/file.md',
-                    'v1.2.3','192.168.0.1','f'*40,'a'*64,'foo_bar','foo-bar',
+                    'v1.2.3','192.168.0.1','`'+'f'*40+'`','`'+'a'*64+'`','foo_bar','foo-bar',
                     '--the','--output=file.txt','`a == b`','```\na == b\n```',
                     'a == b','value >= limit','name=value','foo::bar','x->y']:
             self.assertEqual(tn.normalize(raw),raw)

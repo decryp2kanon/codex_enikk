@@ -104,7 +104,11 @@ def clean_text(text):
     text = re.sub(r"```[\s\S]*?```", " ", text)
     text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", text)
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
-    text = re.sub(r"`([^`]*)`", r"\1", text)
+    # Keep hex-bearing code delimiters until the normalizer has protected them.
+    # Other inline code follows the existing spoken-text policy.
+    text = re.sub(r"`([^`]*)`", lambda m: m.group() if
+                  _symbol_custom is not None and _symbol_custom.HASH_HEX.search(m[1])
+                  else m[1], text)
     lines = []
     for line in text.splitlines():
         if re.fullmatch(r"\s*\|?[\s:|-]+\|?\s*", line):

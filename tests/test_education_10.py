@@ -49,7 +49,7 @@ class CodexTermsTests(unittest.TestCase):
                 raw=template.format(word)
                 with self.subTest(raw=raw):self.assertEqual(tn.normalize(raw),raw)
         for raw in ['tool_call_id','get_tool_call','tool_custom','custom_response',
-                    'TOOL_CALL','v1.2.3','192.168.0.1','a'*40,'f'*64]:
+                    'TOOL_CALL','v1.2.3','192.168.0.1','`'+'a'*40+'`','`'+'f'*64+'`']:
             self.assertEqual(tn.normalize(raw),raw)
 
     def test_source_immutable(self):
