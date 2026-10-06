@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 
 def main():
+    sys.dont_write_bytecode = True
     root = Path(__file__).resolve().parent
     if (root / 'active').is_symlink():
         os.environ.setdefault('ENIKK_TTS_INSTALL', str(root))

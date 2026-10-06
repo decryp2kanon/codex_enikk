@@ -169,6 +169,16 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertEqual(sentinel.read_text(),'core-sentinel')
             self.assertEqual(list(core.iterdir()),[sentinel])
+            fakebin=Path(td)/'bin';fakebin.mkdir()
+            systemctl=fakebin/'systemctl'
+            systemctl.write_text('#!/bin/sh\nprintf "MainPID=0\\nActiveState=inactive\\nSubState=dead\\n"\n')
+            systemctl.chmod(0o755)
+            checked=subprocess.run([str(prefix/'bin/enikk_tts'),'status'],
+                env=env|{'PATH':str(fakebin)+os.pathsep+os.environ['PATH']},capture_output=True,text=True)
+            self.assertEqual(checked.returncode,0,checked.stderr)
+            active=(prefix/'lib/enikk_tts/active').resolve()
+            self.assertFalse((active/'__pycache__').exists())
+            tts_release.verify(active)
 
     def test_voice_status_has_no_start_side_effect(self):
         import runpy
