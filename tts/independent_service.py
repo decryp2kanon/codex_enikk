@@ -50,6 +50,10 @@ class Gate:
         self.seen = set()
         self.sizes = {}
 
+    def active_items(self):
+        """Items whose starts were observed after model readiness."""
+        return set(self.allowed)
+
     def filter(self, envelope):
         if envelope['sent_ns'] < self.ready_ns:
             return None
@@ -147,6 +151,22 @@ class Generation:
         self.engine = subprocess.Popen([str(python), str(ROOT / 'yuki-chatterbox-engine.py')],
             stdin=subprocess.DEVNULL, stdout=self.log, stderr=self.log, start_new_session=True,
             env=os.environ | {'PYTHONDONTWRITEBYTECODE': '1'})
+
+    def reconcile_gap(self):
+        """Fail closed per active item without discarding the warm voice engine."""
+        if self.gate is None:
+            return False
+        active = self.gate.active_items()
+        if not active:
+            self.stream.notify.log_status('sequence gap observed; no active voice item affected')
+            return False
+        self.accumulator.mark_gap(active)
+        self.stream.notify.log_status(
+            f'sequence gap; reconciling {len(active)} active voice item(s) from completion snapshots')
+        return True
+
+    def reconciliation_pending(self):
+        return self.accumulator.reconciliation_pending()
 
     def accept(self, message):
         if self.engine.poll() is not None:
@@ -268,12 +288,12 @@ def serve():
                     continue
                 changed = producer != message['producer']
                 gap = sequence is not None and message['sequence'] != sequence + 1
-                if changed or gap:
+                if changed:
                     cancel()
-                    if gap and not changed:
-                        failures += 1
-                        retry_at = now + min(30, 2 ** min(failures, 5))
-                        error = 'event sequence gap; voice generation discarded'
+                elif gap and generation:
+                    pending = generation.reconcile_gap()
+                    error = ('event sequence gap; reconciling active voice item'
+                             if pending else None)
                 producer, sequence, last = message['producer'], message['sequence'], now
                 if generation and generation.thread != message['thread']:
                     cancel()
@@ -287,7 +307,10 @@ def serve():
                         raise
                 if generation:
                     generation.accept(message)
-                    if generation.gate: failures = 0
+                    if generation.gate:
+                        failures = 0
+                        if error and error.startswith('event sequence gap;') and not generation.reconciliation_pending():
+                            error = None
             except socket.timeout:
                 if generation and time.monotonic() - last > 3:
                     cancel()

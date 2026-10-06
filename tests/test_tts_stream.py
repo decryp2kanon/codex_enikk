@@ -267,6 +267,29 @@ class StreamingTests(unittest.TestCase):
         self.assertEqual(' '.join(j['text'] for j in self.jobs), full)
         self.assertEqual(len({j['id'] for j in self.jobs}), 3)
 
+    def test_sequence_gap_reconciles_known_item_without_repeating_prefix(self):
+        self.delta('첫 문장이야. 둘째')
+        self.a.mark_gap({('turn', 'item')})
+        self.assertTrue(self.a.reconciliation_pending())
+        self.delta(' 잘못 이어붙이면 안 돼.')
+        self.assertEqual([j['text'] for j in self.jobs], ['첫 문장이야.'])
+        full = '첫 문장이야. 둘째 문장이야. 셋째 문장이야.'
+        self.event('item/completed', item=dict(
+            type='agentMessage', id='item', phase='final_answer', text=full))
+        self.assertFalse(self.a.reconciliation_pending())
+        self.assertEqual([j['text'] for j in self.jobs],
+                         ['첫 문장이야.', '둘째 문장이야.', '셋째 문장이야.'])
+        self.assertEqual(len({j['id'] for j in self.jobs}), 3)
+
+    def test_sequence_gap_missing_completion_discards_only_unverifiable_tail(self):
+        self.delta('이미 읽은 문장이야. 미완성')
+        self.a.mark_gap({('turn', 'item')})
+        self.event('turn/completed', turn=dict(id='turn', status='completed', items=[]))
+        self.assertEqual([j['text'] for j in self.jobs], ['이미 읽은 문장이야.'])
+        saved = json.loads(self.a.path('turn', 'item').read_text())
+        self.assertTrue(saved['completed'])
+        self.assertTrue(saved['interrupted'])
+
     def test_reconnect_missing_completed_item_requests_snapshot(self):
         self.delta('첫 문장이야. 다음')
         self.a.snapshot(dict(turns=[dict(id='turn',status='inProgress',items=[])]), reconnecting=True)

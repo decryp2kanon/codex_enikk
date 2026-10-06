@@ -50,6 +50,14 @@ class GateTests(unittest.TestCase):
         self.assertIsNotNone(gate.filter(event('item/agentMessage/delta', 'new')))
         self.assertIsNone(gate.filter(event('item/started', 'new')))
 
+    def test_active_items_only_include_observed_post_ready_starts(self):
+        gate = voice.Gate(100, 'thread')
+        self.assertEqual(gate.active_items(), set())
+        gate.filter(event('item/started', 'known'))
+        self.assertEqual(gate.active_items(), {('turn', 'known')})
+        gate.filter(event('item/agentMessage/delta', 'unknown'))
+        self.assertEqual(gate.active_items(), {('turn', 'known')})
+
     def test_new_generation_never_reuses_allowed_items(self):
         first = voice.Gate(100, 'thread')
         first.filter(event('item/started'))

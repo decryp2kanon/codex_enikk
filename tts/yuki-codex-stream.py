@@ -130,6 +130,20 @@ class Accumulator:
         for job in sorted(jobs, key=lambda job: job['filename']):
             self.submit(job)
 
+    def mark_gap(self, active_items):
+        """Pause only known in-flight items until their full completion snapshot arrives."""
+        for turn, item in active_items:
+            state = self.state(turn, item)
+            if state['completed'] or state['interrupted']:
+                continue
+            state['needs_snapshot'] = True
+            state['gap_snapshot'] = True
+            self.save(state)
+
+    def reconciliation_pending(self):
+        return any(state.get('needs_snapshot') and not state['completed'] and not state['interrupted']
+                   for state in self.items.values())
+
     def emit(self, state, final=False):
         if state['interrupted'] or state.get('needs_snapshot') or state['phase'] not in ('commentary', 'final_answer'):
             return
@@ -174,7 +188,8 @@ class Accumulator:
             state['conflict'] = text
             self.save(state)
             raise ValueError('snapshot changed previously submitted text; preserved for review')
-        state.update(text=text, phase=item.get('phase', state['phase']), needs_snapshot=False)
+        state.update(text=text, phase=item.get('phase', state['phase']),
+                     needs_snapshot=False, gap_snapshot=False)
         if status == 'interrupted':
             state['interrupted'] = True
         self.emit(state, final=status=='completed')
@@ -273,10 +288,21 @@ class Accumulator:
             for item in turn.get('items', []):
                 self.snapshot_item(turn['id'], item, turn['status'])
             if turn['status'] == 'completed':
-                if any(state.get('needs_snapshot') for key, state in self.items.items() if key[0] == turn['id']):
+                unresolved = [(key, state) for key, state in self.items.items()
+                              if key[0] == turn['id'] and state.get('needs_snapshot')]
+                reconnect_unresolved = [state for _, state in unresolved
+                                        if not state.get('gap_snapshot')]
+                if reconnect_unresolved:
                     raise ConnectionError('completed item needs authoritative reconnect snapshot')
+                for key, state in unresolved:
+                    # A sequence gap lost the full item/completed snapshot. Preserve every
+                    # already-emitted sentence and fail closed only for the unverifiable tail.
+                    state['interrupted'] = True
+                    state['completed'] = True
+                    self.save(state)
+                    self.log(f"sequence gap unresolved item={state['item']}; unverifiable tail discarded")
                 for key, state in list(self.items.items()):
-                    if key[0] == turn['id']:
+                    if key[0] == turn['id'] and not state.get('needs_snapshot'):
                         self.emit(state, final=True)
                         state['completed'] = True
                         self.save(state)
