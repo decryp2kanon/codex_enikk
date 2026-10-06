@@ -227,7 +227,9 @@ class CustomOnlyArchitectureTests(unittest.TestCase):
         modules = {alias.name for node in imports if isinstance(node, ast.Import)
                    for alias in node.names}
         modules.update(node.module for node in imports if isinstance(node, ast.ImportFrom))
-        self.assertEqual(modules, {'re', 'functools'})
+        # JSON span recognition is standard-library parsing, not an optional
+        # language normalizer or a production network/runtime dependency.
+        self.assertEqual(modules, {'re', 'functools', 'json'})
         self.assertEqual([(node.module, [alias.name for alias in node.names])
                           for node in imports if isinstance(node, ast.ImportFrom)],
                          [('functools', ['lru_cache'])])

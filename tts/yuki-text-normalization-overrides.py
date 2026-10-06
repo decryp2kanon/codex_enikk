@@ -1,11 +1,13 @@
 """Yuki custom input pronunciations; independent of external normalizers.
 
-Order: path descriptions (engine, once) -> narrow protection/names/units ->
-normalization callback -> checked restoration. No external runtime imports.
+Production: path descriptions (engine, once) -> maximal source token parser ->
+spoken values. Optional callbacks retain legacy checked span restoration.
+No external runtime imports.
 Each exception's reproducer lives in test_text_normalization.py or PathTests
 in test_tts_delivery.py; education grammars have test_education_2_7.py fixtures.
 Korean G2P and voice controls are absent.
 """
+import json
 import re
 from functools import lru_cache
 
@@ -437,6 +439,158 @@ def technical_prose(text):
             reading = '·'.join(lexical_reading(part) or part for part in token.split('·'))
         return (reading or lexical_reading(token) or token) + punctuation
     return TECH_PROSE_TOKEN.sub(replace, text)
+
+
+# The production path reads original maximal tokens once. Legacy callback
+# protection below remains a separate compatibility contract, not a sequence
+# of transforms through which every independent TTS request must pass.
+COMMON_SOURCE_TOKEN = re.compile(r'```[\s\S]*?(?:```|$)|`[^`]*(?:`|$)|\S+')
+COMMON_SUFFIX = re.compile(r'([^가-힣]+)([가-힣]+)')
+COMMON_ENDING = re.compile(PROSE_ENDING +
+    r'|하(?:며|고|면|는|기|다|겠습니다|세요|지|도록)|합니다|해(?:요|서|도)?|했(?:다|고|으며|습니다)')
+COMMON_COUNTERS = frozenset(('개', '회', '초', '명', '건'))
+COMMON_GROUPED = re.compile(r'[1-9][0-9]{0,2}(?:,[0-9]{3})+')
+COMMON_JSON = json.JSONDecoder()
+COMMON_FOLLOWING_UNIT = re.compile(r'[ \t]+([^\s`]+)')
+COMMON_FOLLOWING_SWITCH = re.compile(r'[ \t]+switch(?=[가-힣\s.,!?]|$)')
+
+
+def prose_parts(token):
+    """Split a complete ASCII value and its approved Korean suffix once.
+
+    Counters belong to numeric grammar; verb endings belong only to registered
+    lexical words. Unknown tails remain opaque rather than losing characters.
+    """
+    if not token or not ('가' <= token[-1] <= '힣'):
+        return token, '', False
+    match = COMMON_SUFFIX.fullmatch(token)
+    if match is None:
+        return token, '', False
+    body, tail = match.groups()
+    counter = ''
+    if body[:1] in '+-0123456789' and tail[:1] in COMMON_COUNTERS:
+        counter, tail = tail[0], tail[1:]
+    if tail and not COMMON_ENDING.fullmatch(tail):
+        return token, '', False
+    return body + counter, tail, tail.startswith(('하', '해', '했'))
+
+
+def prose_value(token, anchored=False, reference=False):
+    """Render an unprotected complete candidate; never recurse on output."""
+    body, ending, verb = prose_parts(token)
+    if '·' in token:
+        if PROSE_DOT_LIST.fullmatch(token):
+            return '·'.join(prose_value(part) or part for part in token.split('·'))
+        return None
+    reading = None
+    if not verb and len(body) >= 7:
+        if len(body) == 36 and body[8] == '-':
+            reading = uuid_reading(body)
+        elif body[:1] in '0123456789abcdefABCDEF':
+            reading = hash_reading(body, anchored)
+    if not verb and reading is None and body[:1] in '+-0123456789' and body:
+        reading = quantity_reading(body[1:] if body.startswith('+') else body)
+        if reading is None and COMMON_GROUPED.fullmatch(body):
+            # Existing prose policy strips thousands separators for bare
+            # integers; scalar/count/unit readings use the cardinal renderer.
+            reading = body.replace(',', '')
+    if reading is None and reference and body.startswith(('#', '\\#')) and not verb:
+        match = PROSE_REFERENCE.fullmatch(body)
+        if match:
+            reading = korean_cardinal(match[1]) + ' 번'
+    if reading is None:
+        reading = COMMON_NAMES.get(body) or lexical_reading(body)
+    return None if reading is None else reading + ending
+
+
+def common_prose(text):
+    """One source-offset walk with bounded candidate and suffix dispatch.
+
+    JSON objects/arrays are opaque even when values contain whitespace. Code
+    stays opaque except a single inline hex immediately after a prose label.
+    Number/unit adjacency is consumed from source, not found inside identifiers.
+    """
+    output = []
+    cursor = 0
+    previous = None
+    previous_end = 0
+    consumed_until = 0
+    for match in COMMON_SOURCE_TOKEN.finditer(text):
+        if match.start() < consumed_until:
+            continue
+        raw = match[0]
+        if raw.startswith('&'):
+            raw = PROSE_SPACE_ENTITY.sub('', raw)
+        start, end = match.span()
+        output.append(text[cursor:start])
+        adjacent = '\n' not in text[previous_end:start] and '\r' not in text[previous_end:start]
+        anchored = adjacent and previous in HASH_ANCHORS
+        reference = adjacent and previous in REFERENCE_ANCHORS
+        symbols = symbol_reading(raw) if raw[:1] in SYMBOL_ATOMS and not raw.startswith('`') else None
+        if symbols is not None:
+            output.append(symbols)
+            previous, previous_end = None, end
+            cursor = end
+            continue
+        # Decode only at an object/array boundary, never scan all words for JSON.
+        if raw[:1] in ('{', '['):
+            try:
+                value, json_end = COMMON_JSON.raw_decode(text, start)
+            except (ValueError, RecursionError):
+                pass
+            else:
+                if isinstance(value, (dict, list)) and (json_end >= end or
+                        not text[json_end:end].strip(',!?;.')):
+                    output.append(text[start:json_end])
+                    cursor = consumed_until = json_end
+                    previous, previous_end = None, json_end
+                    continue
+        if raw.startswith('`'):
+            reading = None
+            if anchored and not raw.startswith('``') and raw.endswith('`'):
+                reading = hash_reading(raw[1:-1], anchored=True)
+            output.append(reading or raw)
+            previous, previous_end = None, end
+            cursor = end
+            continue
+        token = raw.rstrip(',!?;')
+        punctuation = raw[len(token):]
+        if token.endswith(':') and token[:-1].lower() in HASH_ANCHORS:
+            token, punctuation = token[:-1], ':' + punctuation
+        if token.endswith('.') and (token.count('.') == 1 or token[:1].isdigit()):
+            token, punctuation = token[:-1], '.' + punctuation
+        label = token.lower()
+        reading = prose_value(token, anchored, reference)
+        duration = SINGLE_HOUR.match(token) if token.startswith('1시간') else None
+        if duration:
+            reading = '한 시간' + token[duration.end():]
+        if token == 'branch과' and COMMON_FOLLOWING_SWITCH.match(text, end):
+            # Preserve the existing coordinating-particle pronunciation.
+            reading = '브랜치와'
+        # Only a complete numeric token can pair with a following unit. Never
+        # search inside x100, identifiers, URLs, filenames or options.
+        if (reading is None or reading == token.replace(',', '')) and token[:1] in '+-0123456789' and token:
+            scalar = PLAIN_NUMBER.fullmatch(token)
+            if scalar and not punctuation:
+                following = COMMON_FOLLOWING_UNIT.match(text, end)
+                if following:
+                    unit_raw = following[1]
+                    unit = unit_raw.rstrip(',!?;.')
+                    unit_body, unit_ending, unit_verb = prose_parts(unit)
+                    if unit_body in KNOWN_UNITS and not unit_verb:
+                        compact = token.lstrip('+') + unit_body
+                        converted = quantity_reading(compact)
+                        if converted is not None:
+                            reading = converted + unit_ending
+                            punctuation = unit_raw[len(unit):]
+                            end = following.end()
+                            consumed_until = end
+                            label = None
+        output.append((reading or token) + punctuation)
+        previous, previous_end = label, end
+        cursor = end
+    output.append(text[cursor:])
+    return ''.join(output)
 # Relative filename tokens and the known digit-bearing extension remain identifiers.
 # Absolute filesystem paths have already gone through the separate path-description layer.
 KNOWN_PROTECTED = re.compile(
@@ -500,6 +654,7 @@ HEARD_ERRORS = {'Python': '파이썬', 'CPU': '씨피유', 'TTS': '티티에스'
                 'km/h': '킬로미터 퍼 아워',
                 # USER-reported failure; raw/1.25x Whisper small/base reproduced it.
                 'branch': '브랜치'}
+COMMON_NAMES = {**NAMES, **HEARD_ERRORS}
 HEARD_TOKEN = re.compile(r'(?<![A-Za-z0-9_./@-])(?:Python|CPU|TTS|API|GPU|VRAM|km/h|'
                          r'branch과(?=\s+switch(?=[가-힣\s.,!?]|$))|branch(?!과[._/@-]))'
                          r'(?![A-Za-z0-9_/@-]|\.[A-Za-z0-9_])')
@@ -656,13 +811,22 @@ def normalize_with_exceptions(text, normalize=None):
         return text
     if text[0].isascii() and CODE_EXPRESSION.fullmatch(text.strip()):
         return text
-    text = symbol_prose(text)
     if normalize is None:
-        # All custom transformations require a Latin name/word or a numeral.
-        # Pure Korean path descriptions need no protect/restore identity pass.
+        # Korean-only prose and symbols use the existing inexpensive path;
+        # they do not need ASCII-value classification or suffix dispatch.
         if not CUSTOM_TRANSFORM_INPUT.search(text):
-            return text
-        normalize = lambda value: value
+            return symbol_prose(text)
+        isolated = symbol_reading(text.strip()) if SYMBOL_HINT.search(text) else None
+        if isolated is not None:
+            return isolated
+        # Preserve the existing code policy: never interpret heading lines
+        # inside a fence, or strip code delimiters before span protection.
+        if '`' not in text:
+            text = MARKDOWN_HEADING.sub(lambda m: korean_cardinal(str(len(m[1]))) + ' 단계 제목 ' + m[2], text)
+        # Independent production never invokes a weekday-rewriting callback.
+        # Preserve the duration policy but omit its obsolete phrase shields.
+        return common_prose(text)
+    text = symbol_prose(text)
     protected = {}
     available = (chr(i) for i in range(0xE000, 0xF900) if chr(i) not in text)
 
