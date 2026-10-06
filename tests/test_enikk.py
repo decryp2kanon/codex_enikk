@@ -682,10 +682,6 @@ while True: time.sleep(1)
                 self.assertEqual(compat_help.returncode, 0, compat_help.stderr)
                 self.assertEqual((prefix / 'lib/codex_enikk/tts/yuki-codex-stream.py').read_bytes(), (ROOT / 'tts/yuki-codex-stream.py').read_bytes())
                 self.assertEqual((prefix / 'lib/codex_enikk/tts/yuki-chatterbox-engine.py').read_bytes(), (ROOT / 'tts/yuki-chatterbox-engine.py').read_bytes())
-                for name in ('README.md', 'manifest.json', 'selected_korean_dictionary.py',
-                             'orchestrator.py', 'nemo_adapter.py', 'LICENSE-MELO.txt'):
-                    self.assertEqual((prefix / 'lib/codex_enikk/tts/upstream' / name).read_bytes(),
-                                     (ROOT / 'tts/upstream' / name).read_bytes())
                 for name in ('codex_enikk', 'codex_session_save.sh'):
                     result = subprocess.run([str(prefix / 'bin' / name), '--version'], env=env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
@@ -738,12 +734,6 @@ while True: time.sleep(1)
         self.assertIn('atempo=1.25', audio)
         self.assertNotIn('/usr/bin/aplay', audio)
         self.assertEqual((lib / 'tts/assets/yuki_super-clean.wav').read_bytes(), (ROOT / 'tts/assets/yuki_super-clean.wav').read_bytes())
-        for name in ('README.md', 'manifest.json', 'selected_korean_dictionary.py',
-                     'orchestrator.py', 'nemo_adapter.py', 'LICENSE-MELO.txt'):
-            self.assertEqual((lib / 'tts/upstream' / name).read_bytes(),
-                             (ROOT / 'tts/upstream' / name).read_bytes())
-            self.assertEqual((previous[0] / 'tts/upstream' / name).read_bytes(),
-                             (ROOT / 'tts/upstream' / name).read_bytes())
         (lib / '.installed-by-codex-enikk').write_text('unmanaged')
         result = subprocess.run(['bash', str(ROOT / 'update.sh')], env=env, capture_output=True)
         self.assertNotEqual(result.returncode, 0)

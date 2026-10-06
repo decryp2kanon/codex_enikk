@@ -42,7 +42,7 @@ AUTO_APPROVED_SCOPES = (
         'required': (
             '# USER: satoshi.md 교육 Part ',
             'QUEUE_REVISION=3',
-            'CODEX_ENIKK_TTS_UPSTREAM=0 custom-only',
+            'custom-only',
             '성공 시 자동 풀반영:',
         ),
     },

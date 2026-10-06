@@ -85,7 +85,7 @@ class TriggerProtocolTests(unittest.TestCase):
         self.inbox.write_text(
             '# USER: satoshi.md 교육 Part 2/12\n'
             'QUEUE_REVISION=3\n\n'
-            '- CODEX_ENIKK_TTS_UPSTREAM=0 custom-only.\n'
+            '- custom-only.\n'
             '성공 시 자동 풀반영:\n'
             '- commit -> main FF merge -> push -> production update\n\n'
             'EOF\n'
@@ -100,7 +100,7 @@ class TriggerProtocolTests(unittest.TestCase):
 
     def test_satoshi_part_parser_and_previous_marker_gate(self):
         body = ('# USER: satoshi.md 교육 Part 3/12\nQUEUE_REVISION=3\n\n'
-                '- CODEX_ENIKK_TTS_UPSTREAM=0 custom-only.\n성공 시 자동 풀반영:\n\nEOF\n')
+                '- custom-only.\n성공 시 자동 풀반영:\n\nEOF\n')
         self.assertEqual(satoshi_training_part(body), 3)
         self.inbox.write_text(body)
         with patch('trigger_service.satoshi_marker', return_value=self.root / 'missing-marker'):
@@ -110,7 +110,7 @@ class TriggerProtocolTests(unittest.TestCase):
     def test_satoshi_completed_turn_schedules_postprocess(self):
         self.inbox.write_text(
             '# USER: satoshi.md 교육 Part 2/12\nQUEUE_REVISION=3\n\n'
-            '- CODEX_ENIKK_TTS_UPSTREAM=0 custom-only.\n성공 시 자동 풀반영:\n\nEOF\n'
+            '- custom-only.\n성공 시 자동 풀반영:\n\nEOF\n'
         )
         with patch('trigger_service.satoshi_marker', return_value=self.root / 'ready'):
             (self.root / 'ready').write_text('PASS')

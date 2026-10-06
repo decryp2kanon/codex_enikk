@@ -1,7 +1,7 @@
 """Yuki-specific text exceptions; independent of NVIDIA package implementation.
 
 Order: path descriptions (engine, once) -> narrow protection/names/units ->
-public NeMo TN (callback) -> checked restoration. No GPU or NeMo imports.
+normalization callback -> checked restoration. No external runtime imports.
 Each exception's reproducer lives in test_text_normalization.py or PathTests
 in test_tts_delivery.py. General grammar, Korean G2P and voice controls are absent.
 """
@@ -16,8 +16,8 @@ def proper_names(text):
                   lambda m: NAMES[m.group()], text, flags=0)
 
 
-# Reproduced NeMo errors and USER-confirmed unit readings. Case matters: GB != Gb.
-# Other numeric/SI rules, ordinary Korean and mathematical operators stay upstream.
+# USER-confirmed narrow readings and protections. Case matters: GB != Gb.
+# Other numeric/SI rules, ordinary Korean and mathematical operators are left unchanged.
 GROUPED_INTEGER = re.compile(r'(?<![A-Za-z0-9_.,])[1-9]\d{0,2}(?:,\d{3})+(?!\d|,\d)')
 # Reproduced 46개/61개/282개/284개/1,024개 were split into smaller counts.
 # Keep correct native readings for other two-digit counts; use public cardinal TN.
@@ -43,7 +43,7 @@ SINGLE_HOUR = re.compile(r'(?<![\w.,+~\-/@:])1시간'
 
 
 # Runtime phrase "작은 일부터" means tasks, not the abbreviated weekday 일.
-# NeMo reproduces "작은 일요일 부터" here; protect only this confirmed context.
+# Protect only this confirmed context.
 WORK_NOUN_PHRASE = re.compile(r'(?<!\w)작은 일부터(?!\w)')
 
 # Runtime duration "수 초가 더 걸렸어" became "수요일 초가 더 걸렸어".
@@ -51,7 +51,7 @@ WORK_NOUN_PHRASE = re.compile(r'(?<!\w)작은 일부터(?!\w)')
 FEW_SECONDS_SUBJECT = re.compile(r'(?<![\w/@-])수 초가(?!\w|\.[A-Za-z0-9_])')
 SU_ITTOROK_PHRASE = re.compile(r'(?<![\w/@-])수 있도록(?!\w|\.[A-Za-z0-9_])')
 # Observed model input: "단정할 수 없어" -> "단정할 수요일 없어".
-# Only this confirmed inflection; leave weekdays and other 수 contexts upstream.
+# Only this confirmed inflection; leave weekdays and other 수 contexts unchanged.
 SU_EOPSEO_PHRASE = re.compile(r'(?<![\w/@-])수 없어(?!\w|\.[A-Za-z0-9_])')
 # Both reproduced in runtime: "설치할 수 있으므로", "섞일 수 있어".
 SU_ISSEO_PHRASE = re.compile(r'(?<![\w/@-])수 (?:있으므로|있어)(?!\w|\.[A-Za-z0-9_])')
@@ -59,14 +59,14 @@ SU_ISSEO_PHRASE = re.compile(r'(?<![\w/@-])수 (?:있으므로|있어)(?!\w|\.[A
 AUDITED_NOUN_PHRASE = re.compile(
     r'(?<![\w/@-])(?:수 (?:있습니다|없어요|없어서|있는|있다)|일 하나를)'
     r'(?!\w|\.[A-Za-z0-9_])')
-# Book-prose cases found in round 29: NeMo changes these dependent-noun
+# Book-prose cases found in round 29: protect these dependent-noun
 # readings to Wednesday. Keep only reproduced endings; do not protect bare 수.
 LITERARY_SU_PHRASE = re.compile(
     r'(?<![\w/@-])수 (?:있을지|없는|없이|있었다)(?!\w|\.[A-Za-z0-9_])')
 # In prose, this means several moves ahead (for example, in a board game).
 SEVERAL_MOVES_AHEAD = re.compile(
     r'(?<![\w/@-])몇 수 앞을(?!\w|\.[A-Za-z0-9_])')
-# NeMo turns the numeral-duration phrase "일 년" into Sunday + year.
+# Protect the numeral-duration phrase "일 년".
 ONE_YEAR_DURATION = re.compile(
     r'(?<![\w/@-])일 년(?!\w|\.[A-Za-z0-9_])')
 # Round-27 fixtures: inflected ability, throat/gold/work/day-count contexts.
@@ -218,7 +218,7 @@ def normalize_paths(text):
                 if '://' in surrounding or '@' in surrounding:
                     return match.group()
             # USER-confirmed bad filename reading; preserve original/span accounting.
-            # Keep version digits for NeMo, and do not rewrite ordinary 'report'.
+            # Keep version digits unchanged, and do not rewrite ordinary 'report'.
             spoken = '리포트 버전 31 점 1'
         kind = '경로' if '/' in path else ''
         result = ' '.join(filter(None, (spoken, description, kind)))

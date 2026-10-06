@@ -24,7 +24,6 @@ mkdir -p -- "$base/lib" "$base/bin"
 mkdir -- "$lib"
 mkdir -- "$lib/tts"
 mkdir -- "$lib/tts/assets"
-mkdir -- "$lib/tts/upstream"
 complete=0
 cleanup() {
     if [[ "$complete" == 0 ]]; then
@@ -40,11 +39,8 @@ trap cleanup EXIT
 for file in enikk.py latest.py persistence.py restore.py check_codex_compat.py handoff_command.py submission_arbiter.py trigger_transport.py trigger_service.py trigger_client.py satoshi_training_supervisor.py README.md LICENSE VERSION uninstall.sh "${commands[@]}"; do
     install -m 644 -- "$source_dir/$file" "$lib/$file"
 done
-for file in README.md DEFERRED-ISSUES.md setup-tts.sh setup-nemo-tn.sh yuki-text-normalization.py yuki-text-normalization-overrides.py yuki-chatterbox-engine.py yuki-codex-notify.py yuki-codex-rollout-watch.py yuki-codex-stream.py; do
+for file in README.md DEFERRED-ISSUES.md setup-tts.sh yuki-text-normalization.py yuki-text-normalization-overrides.py yuki-chatterbox-engine.py yuki-codex-notify.py yuki-codex-rollout-watch.py yuki-codex-stream.py; do
     install -m 644 -- "$source_dir/tts/$file" "$lib/tts/$file"
-done
-for file in README.md manifest.json selected_korean_dictionary.py orchestrator.py nemo_adapter.py LICENSE-MELO.txt; do
-    install -m 644 -- "$source_dir/tts/upstream/$file" "$lib/tts/upstream/$file"
 done
 install -m 644 -- "$source_dir/tts/assets/yuki_super-clean.wav" "$lib/tts/assets/yuki_super-clean.wav"
 chmod 755 "$lib/tts/setup-tts.sh"

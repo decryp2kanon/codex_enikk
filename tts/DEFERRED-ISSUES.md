@@ -9,7 +9,6 @@ TTS 단어장/정규화 반복 작업은 ACTIVE 항목을 자동 스킵하고 �
 - `[HUMAN_PRONUNCIATION]`: 사람 청취로 부자연스러움 확인, 별도 발음 처리 필요
 - `[GENERATION_FAILURE]`: 음성 생성 실패로 검증 미완료
 - `[CONTEXT_AMBIGUOUS]`: 문맥 의미가 불명확해 자동 수정 위험
-- `[UPSTREAM_GRAMMAR]`: upstream 정규화/grammar 한계
 - `[POLICY_UNDEFINED]`: 원하는 낭독 규칙 자체가 아직 미정
 - `[NEEDS_NEW_APPROACH]`: 기존 접근 반복으로 개선 근거 없음
 - `[PERFORMANCE>1%]`: baseline 대비 처리 속도 1.0% 초과 악화
@@ -43,16 +42,6 @@ TTS 단어장/정규화 반복 작업은 ACTIVE 항목을 자동 스킵하고 �
 - 28회차에서 원문 재시도와 split recovery까지 `internal_long_tail`로 거부.
 - WAV/ASR 검증 미완료.
 - 재개 조건: 생성 실패 원인 분리 또는 새로운 재현 경로 확보.
-
-### [CONTEXT_AMBIGUOUS] [SOURCE:UPSTREAM] 수 없음.txt
-- 현재 `수요일 없음.txt`로 오정규화됨.
-- 공백 포함 파일명인지 문장+확장자인지 의미가 불명확해 자동 수정 보류.
-- 재개 조건: 실제 사용 문맥 확보.
-
-### [UPSTREAM_GRAMMAR] [SOURCE:UPSTREAM] 2시간 3분 4초
-- 연속 시간 표현에서 NeMo grammar warning과 원문 반환.
-- 성공 지원으로 간주하지 않음.
-- 재개 조건: 실제 음성 재현 또는 안전한 전용 시간 parser 접근.
 
 ### [POLICY_UNDEFINED] [SOURCE:CUSTOM] commit SHA / technical identifier reading
 - SHA 내부 숫자·영문을 일반 cardinal처럼 읽는 사례가 있음.

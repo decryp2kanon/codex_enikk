@@ -236,7 +236,7 @@ def trim_edge_silence(wav, sample_rate):
 
 
 def korean_pronunciation(text):
-    """Normalize reading text with the persistent CPU NeMo Korean grammar."""
+    """Normalize reading text with Yuki custom rules."""
     return tn.normalize(text)
 
 
@@ -485,13 +485,6 @@ def run():
         log(f"Chatterbox waiting_model_lock run_id={os.environ.get('CODEX_ENIKK_TTS_RUN_ID')}")
         fcntl.flock(model_lock, fcntl.LOCK_EX)
         tn.initialize()
-        status_fn = getattr(tn, 'upstream_status', None)
-        if status_fn is not None:
-            upstream = status_fn()
-            log(
-                f"TTS upstream={1 if upstream['enabled'] else 0} "
-                f"source={upstream['source']} "
-                f"dictionary={'ON' if upstream['dictionary'] else 'OFF'}")
         started = time.monotonic()
         device = "cuda" if torch.cuda.is_available() else "cpu"
         log(f"loading Chatterbox multilingual model on {device}; first run may download model files")

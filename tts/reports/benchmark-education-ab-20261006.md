@@ -8,7 +8,6 @@
 - 입력 크기: 9,393 Unicode characters
 - 입력 SHA-256: `14825803bf1de37162d2c3544151cf99c6ac12d1da13408a4697f353637ee8dd`
 - 전체 delivery parts: 306
-- `CODEX_ENIKK_TTS_UPSTREAM=0`
 - 동일 Chatterbox 경로
 - 전체 원문을 한 job으로 1회 제출
 - 별도 보정 재시도 job 없음

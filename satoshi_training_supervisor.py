@@ -71,16 +71,6 @@ def wait_ready(after_ns, timeout=120):
         time.sleep(.5)
     raise RuntimeError('TTS ready timeout')
 
-def nemo_hits():
-    needles=('yuki-text-normalization.py --serve','nemo_adapter.py --serve','enikk-nemo-tn')
-    hits=[]
-    for p in Path('/proc').iterdir():
-        if not p.name.isdigit() or int(p.name)==os.getpid(): continue
-        try: cmd=(p/'cmdline').read_bytes().replace(b'\0',b' ').decode(errors='replace')
-        except OSError: continue
-        if any(n in cmd for n in needles): hits.append((int(p.name),cmd))
-    return hits
-
 def clean_text(text, run):
     old=os.environ.get('CODEX_ENIKK_TTS_STATE')
     os.environ['CODEX_ENIKK_TTS_STATE']=str(run)
@@ -176,7 +166,7 @@ def restart(old_pid):
     launch.setdefault('XAUTHORITY',f'/run/user/{os.getuid()}/gdm/Xauthority')
     launch.setdefault('DBUS_SESSION_BUS_ADDRESS',f'unix:path=/run/user/{os.getuid()}/bus')
     launch.setdefault('XDG_RUNTIME_DIR',f'/run/user/{os.getuid()}')
-    cmd='cd "$HOME"; export CODEX_ENIKK_TTS_UPSTREAM=0; exec "$HOME/.local/bin/codex_enikk" --tts-debug'
+    cmd='cd "$HOME"; exec "$HOME/.local/bin/codex_enikk" --tts-debug'
     subprocess.run(['gnome-terminal','--window','--title=Enikk','--','bash','-lc',cmd],env=launch,check=True)
     end=time.monotonic()+30
     while time.monotonic() < end:
@@ -201,8 +191,7 @@ def update_report(part, details):
 - Production wrapper PID: {details['pid']}
 - Production run: {details['run']}
 - Loaded code revision before report finalization: {details['loaded']}
-- CODEX_ENIKK_TTS_UPSTREAM=0: confirmed
-- NeMo process count: 0
+- Custom normalization path: confirmed
 - Graduation attempt: {details['attempt']}
 - Graduation receipt parts: {details['parts']} accounted as PLAYED; final failures 0
 - Targeted checkpoint retries: {details.get('targeted_attempts',0)}
@@ -231,8 +220,6 @@ def run(args):
         if git('rev-parse','origin/main') != loaded: raise RuntimeError('main/origin mismatch')
         verify_parity()
         pid,start_ns=restart(args.wrapper_pid); run_state=wait_ready(start_ns)
-        if proc_env(pid).get('CODEX_ENIKK_TTS_UPSTREAM')!='0': raise RuntimeError('UPSTREAM != 0')
-        if nemo_hits(): raise RuntimeError('NeMo process present')
         raw=Path(args.satoshi).read_text(encoding='utf-8'); spoken=clean_text(extract_part(raw,args.part),run_state)
         state.update(status='GRADUATION_FULL_READ',run=str(run_state),pid=pid)
         state_path.write_text(json.dumps(state,ensure_ascii=False,indent=2),encoding='utf-8')
@@ -248,9 +235,8 @@ def run(args):
         report_rev=update_report(args.part,{'pid':pid,'run':run_state.name,'loaded':loaded,
                    'attempt':passed['attempt'],'parts':passed['parts'],'chars':len(spoken),
                    'targeted_attempts':passed['targeted_attempts']})
-        m=marker(args.part,{'PART':f'{args.part:02d}','STATUS':'PASS','PID':pid,'UPSTREAM':0,
-                  'LOADED_REVISION':loaded,'REPORT_REVISION':report_rev,'RUN':run_state,
-                  'NEMO_PROCESSES':0,'GRADUATION_ATTEMPT':passed['attempt'],'GRADUATION_PARTS':passed['parts'],
+        m=marker(args.part,{'PART':f'{args.part:02d}','STATUS':'PASS','PID':pid,
+                  'LOADED_REVISION':loaded,'REPORT_REVISION':report_rev,'RUN':run_state,'GRADUATION_ATTEMPT':passed['attempt'],'GRADUATION_PARTS':passed['parts'],
                   'TARGETED_RETRIES':passed['targeted_attempts']})
         state.update(status='PASS',pid=pid,run=str(run_state),marker=str(m),finished_at=time.time(),graduation=passed)
         state_path.write_text(json.dumps(state,ensure_ascii=False,indent=2),encoding='utf-8'); return 0

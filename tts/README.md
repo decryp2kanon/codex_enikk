@@ -187,122 +187,12 @@ jobs. They contain visible spoken text and are private runtime state, never
 repository assets. Retention/pruning is not automated.
 
 
-### Public Korean text normalization
+### Korean text normalization
 
-Reading text now uses NVIDIA NeMo Text Processing 1.2.0 Korean deterministic TN
-(Apache-2.0), with Pynini 2.1.6.post1. This is a public implementation, not a
-national standard or a guarantee of correct readings for every input.
-`setup-nemo-tn.sh` prepares a separate CPU environment at
-`~/Apps/enikk-nemo-tn`, builds the FAR cache once, and leaves the Chatterbox venv
-unchanged. `CODEX_ENIKK_TN_HOME` can select an alternate prepared environment.
-A persistent private NeMo adapter initializes once per worker and handles
-subsequent requests without downloads or per-sentence process/model
-initialization. Set `CODEX_ENIKK_TTS_UPSTREAM=0` to disable NeMo and every other
-upstream normalizer together; TTS setup then skips NeMo environment preparation
-and normalization uses only Yuki custom exceptions. That mode does not import
-NeMo or the selected 9-token dictionary, and works if the NeMo adapter and
-helper path are absent. The default is `0`, so custom-only mode is used unless `CODEX_ENIKK_TTS_UPSTREAM=1` is explicitly set.
-Readiness, writes and replies have bounded deadlines; failures are explicit,
-with no fallback to the old pronunciation tables. Codex remains usable if TTS
-initialization fails.
+Reading text uses only the Yuki custom normalization layer. There is no optional external normalization backend, dictionary source layer, or secondary normalization process.
 
-The project-name exceptions remain Yuki, Enikk and Sugarchain. General English, except the narrow USER-confirmed listening errors below,
-is left to upstream, which often retains the original spelling; this does not
-establish correct acoustic pronunciation of brands or acronyms. No additional
-Korean phonology/G2P or legacy pronunciation table is applied. Filesystem descriptions
-remain a separate path-only feature. Normalization precedes safe splitting, and
-the guard analyzes the same text sent to generation. Displayed source text and
-path replacement accounting are retained.
+The custom layer keeps narrow, USER-confirmed rules for project names, selected technical terms, unit/number exceptions, path descriptions, and context-specific protections. Identifier, path, URL, email, version, and filename boundaries are guarded so prose normalization does not silently rewrite technical identifiers.
 
-The candidate adds only protections for reproduced NeMo 1.2.0 errors:
+Protected spans use input-disjoint markers that must survive exactly once; missing or duplicated markers fail explicitly. Normalization runs before safe chunk splitting, and the guard analyzes the same text sent to generation. Displayed source text and path replacement accounting are retained.
 
-- A standalone `일반` token is protected from the erroneous `일요일 반` reading.
-  Attached forms such as `일반적인` and legitimate `일요일 반` remain untouched.
-- Valid thousands groups such as `1,024` lose their grouping commas before TN.
-  Prose commas, malformed groups, leading-zero identifiers and decimal fractions
-  are not treated as thousands groups.
-- Attached numeric `GB`, `MB`, `TB`, `kHz`, `kbps` and `km/h` receive case-sensitive unit
-  labels. Their numbers still go through NeMo once. `Gb`, mixed identifiers and
-  ranges are not silently interpreted as byte quantities.
-- Digit-bearing relative filenames and `.mp3` are preserved as identifiers,
-  instead of partly normalizing their embedded numbers. Preservation does not
-  guarantee a particular spoken filename pronunciation.
-
-Following USER listening feedback, exact case-sensitive prose tokens `Python`,
-`CPU`, `TTS`, `API`, `GPU`, and `VRAM` have explicit readings: 파이썬, 씨피유,
-티티에스, 에이피아이, 지피유, and 브이램. `km/h` is read as 킬로미터 퍼 아워.
-These are not general letter mappings: longer words, identifiers, filenames,
-URLs and emails are excluded from these token substitutions.
-The known filename `report_v31.1.md` is described as
-리포트 버전 31 점 1 마크다운 파일 only in the path-description layer, retaining
-its original identifier/span accounting. Only this known filename uses explicit
-spacing between version components; ordinary numeric versions are unchanged.
-Attached or spaced particles agree with the final 파일 noun, while absolute
-path descriptions retain their existing 경로 particle behavior.
-Other relative filenames and ordinary `report` prose receive no new description.
-All other previously accepted readings and the upstream default remain in place.
-
-Protected spans use input-disjoint markers that must survive exactly once;
-missing or duplicated markers fail explicitly. Restoring these exact spans is
-not a general Korean post-replacement pass. Working upstream date, time, percent,
-version and ordinary decimal rules receive no custom overrides.
-
-Remaining upstream limitations include untranslated English/acronyms, spaced
-unit forms, partially normalized URLs/email and operators, `10/2` being treated
-as a fraction, and an explicit unary plus disappearing from `+5`. Version `3.10`
-retains its final zero. These limitations are reported rather than patched with
-an unverified general dictionary. The CPU corpus verifies text transformations;
-acoustic pronunciation and live candidate playback still require listening.
-
-Current app processes are not hot-patched. After a managed update, exit normally
-and run `codex_enikk resume <thread-id>` to load the new worker. Retain the previous
-managed installation when testing; a rollback restores the previous engine and
-removes the new normalization module from the execution path, without deleting
-models, references or the dedicated CPU environment.
-
-
-### NeMo adapter, optional upstream dictionary, and Yuki overrides
-
-`yuki-text-normalization.py` delegates once to `tts/upstream/orchestrator.py`.
-That boundary checks `CODEX_ENIKK_TTS_UPSTREAM` before importing either source.
-When enabled, the existing sequence is preserved: selected 9-token dictionary,
-Yuki protection/custom fixes, NeMo TN, checked restoration. The isolated
-`nemo_adapter.py` owns the persistent CPU protocol and public NeMo Normalizer.
-When disabled, the dictionary and NeMo source are both bypassed, no NeMo child
-starts, and the custom exception layer uses an identity callback.
-
-NeMo-specific code is confined to `tts/upstream/nemo_adapter.py`,
-`setup-nemo-tn.sh`, its conditional setup call, and NeMo-only tests/docs.
-Removing those source-specific files and install-list entries leaves the custom
-module, orchestrator, and TTS engine unchanged; run with the global switch set
-to `0` for custom-only operation. Updating the pinned NeMo environment remains
-independent of both local layers.
-
-The engine calls `normalize_paths` through the override module once, preserving
-original text and replacement/span accounting. Then names and narrow protection
-run before public NeMo TN; protected spans are restored only after checking that
-each marker survived exactly once. Numeric unit values use the same public TN
-instance. The optional upstream-derived exact-token dictionary adds no Korean
-G2P pass.
-
-Override reasons and reproducers remain explicit:
-
-- Yuki/Enikk/Sugarchain: USER-defined identity names; `test_only_proper_names`.
-- Standalone 일반: upstream's 일요일 반 error; `test_no_general_korean_rewriting`
-  and the installed Korean grammar fixtures.
-- Valid thousands groups: upstream comma splitting;
-  `test_thousands_groups_only` and grammar fixtures.
-- Attached GB/MB/TB/kHz/kbps/km/h: reproduced unit readings;
-  `test_byte_units_are_case_sensitive_and_identifiers_not_units` and integration fixtures.
-- Python/CPU/GPU/TTS/API/VRAM: USER-confirmed listening exceptions;
-  `test_heard_terms_do_not_change_words_identifiers_or_addresses`.
-- Digit-bearing filename protection and report_v31.1.md path description:
-  identifier preservation and observed version/particle errors;
-  `test_only_digit_bearing_file_identifiers_are_protected` and delivery `PathTests`.
-- Marker restoration: fail closed on lost/duplicated spans;
-  `test_lost_or_duplicate_protection_fails_closed`.
-
-This is a structural separation, not a new pronunciation correction. Upstream
-limitations and remaining human listening requirements are unchanged. Install
-and update scripts copy both modules; this change alone does not update a
-running or managed installation.
+Current app processes are not hot-patched. After a managed update, exit normally and run `codex_enikk --tts-debug` or resume the session to load the new worker.

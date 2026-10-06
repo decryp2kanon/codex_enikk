@@ -21,8 +21,6 @@
 - New wrapper PID: `3624520`
 - New TTS run: `run-0wb080f4`
 - Ready event: `tts_mode=streaming reason=ready monotonic_ns=584202562697426`
-- `CODEX_ENIKK_TTS_UPSTREAM=0`: confirmed.
-- NeMo/nemo_adapter/enikk-nemo-tn standalone process: 0 actual processes observed.
 - New wrapper owns Codex app-server, streaming TTS helper and trigger service children normally.
 
 ## Source / production parity

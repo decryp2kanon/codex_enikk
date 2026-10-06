@@ -4,7 +4,6 @@
 - Source: `/home/ak/satoshi.md`
 - Part: 인트로
 - 범위: 파일 시작부터 `## 1. 사라진 개발자` 직전까지
-- Training mode: `CODEX_ENIKK_TTS_UPSTREAM=0` (custom-only)
 
 ## 작업 결과
 - Trigger task: `50e3bf15c66e5e4f07ac9e655ecff75c9c1f6d89dee62dc44ab0614cdad3b05e`
@@ -17,7 +16,6 @@
 ## 문제 및 재시도
 - 이 Part에서 repository change가 필요하다고 판정된 재현 가능한 normalization/chunking 문제는 없음.
 - 불필요한 old KOREAN_TECH 복원이나 broad dictionary 추가는 하지 않음.
-- upstream/NeMo 경로는 사용하지 않음.
 
 ## 테스트 / 졸업 상태
 - Part 01 task는 `COMPLETED`로 종료됨.
@@ -32,8 +30,6 @@
 
 ## Production verification
 - Status: PENDING_RESTART
-- `CODEX_ENIKK_TTS_UPSTREAM=0`: restart 후 확인 예정
-- NeMo process count: restart 후 확인 예정
 - Ready time: restart 후 기록 예정
 - Production loaded revision: restart 후 기록 예정
 

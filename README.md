@@ -208,11 +208,8 @@ Chatterbox 모델은 최초 실행 때 정상 사용자 cache로 자동 다운�
 다른 승인된 reference를 명시적으로 설치하려면
 `CODEX_ENIKK_CHATTERBOX_REFERENCE_SOURCE=/path/reference.wav`를 설치 명령에 지정합니다.
 
-읽기 텍스트는 별도 CPU 환경의 NeMo 1.2.0 한국어 TN 기본 문법으로 정규화합니다.
-기본값은 `CODEX_ENIKK_TTS_UPSTREAM=0`입니다. upstream을 사용하려면 `CODEX_ENIKK_TTS_UPSTREAM=1`을 명시합니다. 기본 custom-only 모드에서는 NeMo와
-선택형 9개 사전 규칙은 import/실행하지 않고 Yuki custom 예외만 적용합니다.
-임의 기술어·숫자 치환 목록은 사용하지 않으며, 미지원 영어와 기호는 upstream 동작을
-따릅니다. 알려진 출력 차이는 tts/README.md에 기록합니다. 화면 원문은 변경하지 않습니다. 각 chunk는 완성되는 즉시 재생
+읽기 텍스트는 Yuki custom 정규화만 사용합니다. 별도 외부 정규화 백엔드나 선택형 사전 프로세스는 없습니다.
+검증된 프로젝트명·기술어·숫자·단위·경로 예외만 좁게 적용하며 화면 원문은 변경하지 않습니다. 각 chunk는 완성되는 즉시 재생
 queue에 들어가므로 뒤쪽 문장 전체의 합성을 기다리지 않습니다.
 
 단일 줄바꿈은 같은 대화 흐름으로 이어 읽고, 빈 줄은 짧은 문단 호흡으로 처리합니다.

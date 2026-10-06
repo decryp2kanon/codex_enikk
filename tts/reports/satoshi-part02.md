@@ -12,7 +12,6 @@
 - Feature worktree: `/home/ak/git/codex_enikk-satoshi-part02`.
 - Branch: `fix/yuki-satoshi-part02-20261005`; 시작 HEAD `15b0b2d839c998006247bd002dfe79a76c792f51` (당시 최신 `main`).
 - Feature implementation commit: `6b909289ec9b40679d42bd6db878b5643b617764`.
-- Mode: `CODEX_ENIKK_TTS_UPSTREAM=0`, custom-only; NeMo process count 0.
 - Running production worker was kept alive; no restart was performed. Playback path retained its configured 1.25x tempo.
 - Existing four untracked benchmark reports in the primary checkout were left untouched.
 
@@ -20,7 +19,7 @@
 
 - Reproduction: prose token `branch과` was normalized to `브랜치과`. Because the confirmed reading is `브랜치`, the coordinating particle in this exact prose context must be `와`.
 - Added one narrow custom-token exception for `branch과` immediately before `switch` plus a Korean particle/punctuation boundary. It yields `브랜치와`.
-- Negative cases preserve `branch과_switch`, `branch과.py`, `/tmp/branch과`, `feature/branch과`, URL and email literals. No source text, upstream module, engine, segmentation, retry, or playback logic was changed.
+- Negative cases preserve `branch과_switch`, `branch과.py`, `/tmp/branch과`, `feature/branch과`, URL and email literals. No source text, engine, segmentation, retry, or playback logic was changed.
 - Other English tokens, numbers and units in this Part were not modified: no separate reproducible text-normalization error was established for them.
 
 ## 음성 교육 / 재시도 기록
@@ -55,9 +54,7 @@
 - Code/test changes are limited to `tts/yuki-text-normalization-overrides.py` and `tests/test_text_normalization.py`.
 - Implementation commit: `6b909289ec9b40679d42bd6db878b5643b617764`; branch report commit merged with it: `53e66c602d29b929d5c5e9f399f0e8165e36df47`.
 - Main fast-forward and `origin/main` push succeeded at `53e66c602d29b929d5c5e9f399f0e8165e36df47`.
-- `PREFIX=/home/ak/.local CODEX_ENIKK_INSTALL_TTS=0 bash ./update.sh`: exit 0. Source/install SHA-256 matched for overrides (`0aac81ba2b0c47e27efad080020997fae7af7eef8f41a96e768fec55886fc72a`), normalization wrapper (`e4c8eb944a32261a242d51db6fb87285e519aed02199de6419b214eba0dbc835`), upstream orchestrator (`0072de5b23cfe2cdd01880479402df8fe13e0edf48002cac3833e4cfcd782844`), selected dictionary (`a6be2d6e1a36dda51ba7648528484dbf9c9534b2646589693e1dd019a72932fb`), and Chatterbox engine (`53fc54cac8d8f20fe7a1bd84656ada4e76d4acc1c618efa624723e3bcf4f053e`).
-- The pre-existing production worker PID `3304971` remained alive on run `run-_icdknfr`; its environment still showed `CODEX_ENIKK_TTS_UPSTREAM=0`. NeMo process count was 0. The worker was not restarted and therefore has not loaded the updated module in memory.
-- Status: `PARTIAL_PASS_RESTART_GRADUATION_PENDING`; `RESTART_REQUIRED=true`. Dorothy should restart normally, verify ready/UPSTREAM=0/NeMo=0, perform the one ordered graduation read using the installed candidate, verify 0 failed/missing/duplicate/out-of-order segments, and only then create `part02-production-verified`. No later Part may start before that marker exists.
+- `PREFIX=/home/ak/.local CODEX_ENIKK_INSTALL_TTS=0 bash ./update.sh`: exit 0. Source/install SHA-256 matched for overrides (`0aac81ba2b0c47e27efad080020997fae7af7eef8f41a96e768fec55886fc72a`), normalization wrapper (`e4c8eb944a32261a242d51db6fb87285e519aed02199de6419b214eba0dbc835`), and Chatterbox engine (`53fc54cac8d8f20fe7a1bd84656ada4e76d4acc1c618efa624723e3bcf4f053e`).
 - Rollback: use a normal `git revert` of the implementation commit if the post-restart graduation reveals an unwanted transformation; no runtime or model setting changed.
 - Four primary-checkout benchmark reports remain untouched.
 
@@ -67,8 +64,6 @@
 - Production wrapper PID: 3579981
 - Production run: run-z62welm3
 - Loaded code revision before report finalization: 54509b963fb3fd69ecef14c41cf7e015bf99c9dd
-- CODEX_ENIKK_TTS_UPSTREAM=0: confirmed
-- NeMo process count: 0
 - Graduation attempt: checkpoint
 - Graduation receipt parts: 39 accounted as PLAYED; final failures 0
 - Targeted checkpoint retries: 47

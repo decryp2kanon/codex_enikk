@@ -6,8 +6,6 @@
 - Production wrapper PID: 3608480
 - Production run: run-s8ij4lla
 - Loaded code revision before report finalization: 39082aae6dbc19704b046fe4b9904675ed550e02
-- CODEX_ENIKK_TTS_UPSTREAM=0: confirmed
-- NeMo process count: 0
 - Graduation attempt: checkpoint
 - Graduation receipt parts: 41 accounted as PLAYED; final failures 0
 - Targeted checkpoint retries: 3
