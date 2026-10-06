@@ -166,3 +166,17 @@ Apply voice code with `enikk_tts update /path/to/source` then `enikk_tts restart
 Hash pronunciation accepts adjacent-anchor hex tokens from 7 characters;
 6 or fewer remain excluded. Standalone detection still requires 32 characters,
 and inline/fenced code and machine literals remain protected.
+
+UUID values in prose have a separate full-token grammar for five hexadecimal
+groups of lengths 8, 4, 4, 4 and 12. Each character is spoken with the shared
+hex character names, with `대시` between groups. Case is ignored for speech;
+all characters and groups are retained, with no hash abbreviation. Korean
+particles/endings may follow the value. Code, URL, path, filename, assignment
+and JSON machine-literal boundaries remain opaque. Screen/source text is unchanged.
+
+Mixed Korean prose also accepts attached hash particles, registered lexical
+words with common Korean verb endings, SHA algorithm labels, numeric counts,
+rates, compact ranges and numeric fractions. Range separators and decimal dots
+may carry Markdown escapes. Numeric PR/issue references require an adjacent
+reference label. These are full-token grammars, not full-sentence exceptions;
+URL, code, path and assignment tokens remain outside them.

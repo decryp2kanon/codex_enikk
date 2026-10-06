@@ -270,6 +270,67 @@ HASH_ANCHORS = frozenset(('hash', 'commit', 'sha', 'sha1', 'sha-1', 'sha256',
 HASH_NAMES = dict(zip('0123456789abcdef',
     ('제로', '원', '투', '쓰리', '포', '파이브', '식스', '세븐', '에이트', '나인',
      '에이', '비', '씨', '디', '이', '에프')))
+PROSE_PARTICLE = r'(?:에서도|에서는|에도|으로|에서|에게|은|는|이|가|을|를|의|에|로|와|과|도)'
+HASH_WITH_PARTICLE = re.compile(r'([0-9a-fA-F]{7,})(' + PROSE_PARTICLE + r')')
+PROSE_NUMBER = r'-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\\?\.\d+)?'
+PROSE_ENDING = PROSE_PARTICLE + r'|입니다|이에요|예요|였습니다|이고|이며|이면|라면|면|일'
+PROSE_QUANTITY = re.compile(
+    r'(?P<first>' + PROSE_NUMBER + r')(?P<left_unit>[A-Za-zµ°²/%]*)'
+    r'(?:(?:\\?~)(?P<second>' + PROSE_NUMBER + r')'
+    r'(?P<right_unit>[A-Za-zµ°²/%]*))?'
+    r'(?P<counter>개|회|초|명|건)?(?P<particle>' + PROSE_ENDING + r')?')
+PROSE_REFERENCE = re.compile(r'\\?#([1-9][0-9]{0,8})(' + PROSE_ENDING + r')?')
+PROSE_RATIO = re.compile(r'(\d{1,3}(?:,\d{3})+|\d+)/(\d{1,3}(?:,\d{3})+|\d+)(' + PROSE_ENDING + r')?')
+REFERENCE_ANCHORS = frozenset(('pr', 'issue', 'pull-request', '이슈'))
+PROSE_SPACE_ENTITY = re.compile(r'^(?:(?:&#32;|&#x20;|&nbsp;))+', re.IGNORECASE)
+SHA_ALGORITHM = re.compile(r'SHA-?([1-9][0-9]{0,3})(' + PROSE_PARTICLE + r')?', re.IGNORECASE)
+UUID_TOKEN = re.compile(
+    r'([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
+    r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(' + PROSE_ENDING + r')?')
+
+
+def uuid_reading(token):
+    """Read complete UUID structure, independently of hash abbreviation."""
+    if len(token) < 36 or len(token) > 48 or token[8] != '-':
+        return None
+    match = UUID_TOKEN.fullmatch(token)
+    if match is None:
+        return None
+    groups = [' '.join(HASH_NAMES[c] for c in group.lower())
+              for group in match[1].split('-')]
+    return ', 대시, '.join(groups) + (match[2] or '')
+
+
+def quantity_reading(token):
+    """Full prose quantities only; paths, versions and machine tokens stay opaque."""
+    if '/' in token:
+        ratio = PROSE_RATIO.fullmatch(token)
+        if ratio:
+            numerator, denominator = (value.replace(',', '') for value in ratio.groups()[:2])
+            if max(len(numerator), len(denominator)) <= 32 and int(denominator) != 0:
+                return (korean_cardinal(denominator) + ' 분의 ' + korean_cardinal(numerator) +
+                        (ratio[3] or ''))
+            return None
+    match = PROSE_QUANTITY.fullmatch(token)
+    if match is None:
+        return None
+    first, second = match['first'], match['second']
+    if any(len(value.lstrip('-').split('.')[0].replace(',', '')) > 32
+           for value in (first, second) if value is not None):
+        return None
+    units = (match['left_unit'], match['right_unit'] or '')
+    if any(unit and unit not in KNOWN_UNITS and unit != '/s' for unit in units):
+        return None
+    # Leave ordinary bare prose numerals to the existing policy.
+    if second is None and not any(units) and not match['counter']:
+        return None
+    def spoken(value, unit):
+        reading = korean_number(value.replace('\\.', '.'))
+        return reading + (' ' + ('퍼 세컨드' if unit == '/s' else KNOWN_UNITS[unit]) if unit else '')
+    result = spoken(first, units[0])
+    if second is not None:
+        result += '에서 ' + spoken(second, units[1])
+    return result + (' ' + match['counter'] if match['counter'] else '') + (match['particle'] or '')
 
 
 def hash_reading(token, anchored=False):
@@ -283,10 +344,14 @@ def hash_reading(token, anchored=False):
 
 CODE_LITERAL = re.compile(r'```[\s\S]*?(?:```|$)|`[^`]*(?:`|$)')
 CUSTOM_TRANSFORM_INPUT = re.compile(r'[A-Za-z\d]')
-TECH_WITH_PARTICLE = re.compile(r'([A-Za-z][A-Za-z_-]*)(에서도|에서는|으로|에서|에게|은|는|이|가|을|를|의|에|로|와|과|도)')
+TECH_WITH_PARTICLE = re.compile(
+    r'([A-Za-z][A-Za-z_-]*)(' + PROSE_ENDING +
+    r'|하(?:며|고|면|는|기|다|겠습니다|세요|지|도록)|합니다|해(?:요|서|도)?|했(?:다|고|으며|습니다))')
 
 
 PROSE_READINGS = {**TECH_ROOTS, **FUNCTION_WORDS, **CODEX_LABELS}
+PROSE_READINGS.update({'URL': '유알엘', 'UUID': '유유아이디',
+                       'url': '유알엘', 'uuid': '유유아이디'})
 CODEX_PROSE_READINGS = {word.title(): TECH_ROOTS[word] for word in CODEX_ROOTS}
 CODEX_PROSE_READINGS.update(CODEX_LABELS)
 PROSE_READINGS.update(CODEX_PROSE_READINGS)
@@ -296,6 +361,12 @@ PROSE_READINGS.update({word.title(): reading for word, reading in FUNCTION_WORDS
 
 def lexical_reading(token):
     """Registered words and productive plurals; unknown machine tokens are opaque."""
+    if token[:3].lower() == 'sha':
+        algorithm = SHA_ALGORITHM.fullmatch(token)
+        if algorithm:
+            return '에스 에이치 에이 ' + korean_cardinal(algorithm[1]) + (algorithm[2] or '')
+        if token.lower() == 'sha':
+            return '에스 에이치 에이'
     reading = PROSE_READINGS.get(token)
     if reading is not None:
         return reading
@@ -324,22 +395,36 @@ def lexical_reading(token):
 def technical_prose(text):
     # Single registry scan. Literal dots, slashes, underscores, options and
     # embedded code delimiters never match a registered word.
-    if not TECH_ASCII.search(text):
+    if not CUSTOM_TRANSFORM_INPUT.search(text):
         return text
     previous = None
     previous_end = 0
     def replace(match):
         nonlocal previous, previous_end
         raw = match.group()
+        raw = PROSE_SPACE_ENTITY.sub('', raw)
         anchored = previous in HASH_ANCHORS and '\n' not in text[previous_end:match.start()] and '\r' not in text[previous_end:match.start()]
+        reference_context = previous in REFERENCE_ANCHORS and '\n' not in text[previous_end:match.start()] and '\r' not in text[previous_end:match.start()]
         previous, previous_end = raw.lower(), match.end()
         if raw.startswith('`'):
             return raw
         token = raw.rstrip(',!?;')
         punctuation = raw[len(token):]
-        if token.endswith('.') and token.count('.') == 1:
+        if token.endswith('.') and (token.count('.') == 1 or token[:1].isdigit()):
             token, punctuation = token[:-1], '.' + punctuation
-        reading = hash_reading(token, anchored) if len(token) >= 7 else None
+        particle = HASH_WITH_PARTICLE.fullmatch(token) if len(token) >= 8 else None
+        hash_token = particle[1] if particle else token
+        reading = uuid_reading(token) if len(token) >= 36 else None
+        if reading is None:
+            reading = hash_reading(hash_token, anchored) if len(hash_token) >= 7 else None
+        if reading is not None and particle:
+            reading += particle[2]
+        if reading is None and token[:1] in '-0123456789' and token:
+            reading = quantity_reading(token)
+        if reading is None and reference_context and token.startswith(('#', '\\#')):
+            reference = PROSE_REFERENCE.fullmatch(token)
+            if reference:
+                reading = korean_cardinal(reference[1]) + ' 번' + (reference[2] or '')
         return (reading or lexical_reading(token) or token) + punctuation
     return TECH_PROSE_TOKEN.sub(replace, text)
 # Relative filename tokens and the known digit-bearing extension remain identifiers.
@@ -597,6 +682,10 @@ def normalize_with_exceptions(text, normalize=None):
     text = KNOWN_PROTECTED.sub(lambda match: protect(match.group()), text)
     # One scan handles spoken number/unit forms and valid standalone thousands groups.
     def number_or_grouped(match):
+        # Keep compact ranges intact for the full-token quantity grammar below.
+        token = surrounding_token(text, *match.span()).rstrip(',!?;.')
+        if '~' in token:
+            return match.group()
         if match.group('grouped_integer') is not None:
             return match.group('grouped_integer').replace(',', '')
         unit_name = match.group('unit_token')
@@ -611,7 +700,7 @@ def normalize_with_exceptions(text, normalize=None):
 
     text = NUMBER_OR_GROUPED_INTEGER.sub(number_or_grouped, text)
     text = LARGE_ITEM_COUNT.sub(
-        lambda match: protect(normalize(match.group(1)) + ' 개'), text)
+        lambda match: protect(korean_cardinal(match.group(1)) + ' 개'), text)
 
     text = heard_error_readings(text)
     result = normalize(technical_prose(text))

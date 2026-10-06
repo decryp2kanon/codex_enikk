@@ -36,6 +36,14 @@ class HashReadingTests(unittest.TestCase):
         self.assertEqual(tn.normalize('commit 271cb86'),
                          '커밋 투 세븐 원 씨 비 에이트 식스로 시작하는 해시고 총길이 칠 글자')
 
+    def test_korean_particles_after_hash(self):
+        value = 'aBcD091e' * 5
+        for particle in ('를', '은', '으로', '에서', '의'):
+            result = tn.normalize('commit '+value+particle)
+            self.assertIn('총길이 사십 글자'+particle, result)
+        for raw in ('/tmp/'+value+'를', value+'를_id', '`commit '+value+'를`'):
+            self.assertEqual(tn.normalize(raw), raw)
+
     def test_anchor_scope(self):
         for anchor in ('hash','commit','SHA','SHA1','SHA-1','SHA256','SHA-256',
                        'digest','checksum','release','revision','rev','COMMIT',
@@ -52,9 +60,9 @@ class HashReadingTests(unittest.TestCase):
     def test_machine_boundaries(self):
         value = '4acb675fbe30fe1f99e0e4c1a6b4ea45ba62d29f'
         for raw in ('deadbeef','cafe1234','abcdef12',
-                    '9'*64,'ff0000','abcdef','v4.10.12','192.168.0.1','::1',
-                    '01234567-89ab-cdef-0123-456789abcdef'):
+                    '9'*64,'ff0000','abcdef','v4.10.12','192.168.0.1','::1'):
             self.assertEqual(tn.normalize(raw),raw)
+        self.assertNotIn('시작하는 해시', tn.normalize('01234567-89ab-cdef-0123-456789abcdef'))
         self.assertEqual(tn.normalize('12345678'),'천이백삼십사만오천육백칠십팔')
         self.assertEqual(tn.normalize('20261007'),'이천이십육만천칠')
         for template in ('https://example.com/{}','{}@example.com','/tmp/{}/file',
