@@ -133,7 +133,7 @@ class Units100NormalizationTests(unittest.TestCase):
 
     def test_compact_and_spaced_prose_units(self):
         self.assertEqual(tn.normalize('8 GB and 250Mbps'),
-                         '팔 기가바이트 and 이백오십 메가비트 퍼 세컨드')
+                         '팔 기가바이트 앤드 이백오십 메가비트 퍼 세컨드')
         self.assertEqual(tn.normalize('10 km/h, 5 m/s'),
                          '십 킬로미터 퍼 아워, 오 미터 퍼 세컨드')
         self.assertEqual(tn.normalize('1,234 widgets'), '1234 widgets')

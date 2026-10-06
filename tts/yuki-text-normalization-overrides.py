@@ -190,6 +190,34 @@ perf=퍼프 free=프리 export=익스포트 source=소스 bash=배시 no=노 hup
 kernel=커널 primitive=프리미티브 util=유틸 crypto=크립토 test=테스트 bench=벤치 functional=펑셔널 fuzz=퍼즈
 contrib=컨트리브 dev=데브 tool=툴 depends=디펜즈 package=패키지 bitcoin=비트코인 chainstate=체인스테이트 debug=디버그 text=텍스트
 '''.split())
+# Function words are lexical entries, never whole-input overrides.
+# Keep the existing single token scan and literal boundary policy.
+FUNCTION_WORDS = dict(item.split('=', 1) for item in '''
+a=어 an=앤 the=더 and=앤드 or=오어 but=벗 so=소 as=애즈
+if=이프 because=비커즈 though=도우 while=와일 when=웬 where=웨어 whether=웨더 than=댄
+of=오브 in=인 on=온 at=앳 by=바이 for=포 from=프롬 to=투
+with=위드 without=위드아웃 about=어바웃 against=어겐스트 among=어몽 between=비트윈 into=인투 through=스루
+during=듀어링 before=비포 after=애프터 above=어버브 below=빌로 under=언더 over=오버 I=아이
+me=미 my=마이 mine=마인 we=위 us=어스 our=아워 ours=아워스 you=유
+your=유어 yours=유어스 he=히 him=힘 his=히즈 she=쉬 her=허 it=잇
+its=잇츠 they=데이 them=뎀 their=데어 this=디스 that=댓 these=디즈 those=도즈
+who=후 whose=후즈 which=위치 what=왓 is=이즈 am=앰 are=아 was=워즈
+were=워 be=비 been=빈 being=비잉 do=두 does=더즈 did=디드 have=해브
+has=해즈 had=해드 can=캔 could=쿠드 will=윌 would=우드 should=슈드 may=메이
+might=마이트 must=머스트 not=낫 no=노 some=썸 any=애니 each=이치 every=에브리
+all=올 both=보스 either=이더 neither=니더
+'''.split())
+
+
+def function_reading(token):
+    if token in FUNCTION_WORDS:
+        return FUNCTION_WORDS[token]
+    # Sentence-initial title case is prose; opaque uppercase acronyms remain so.
+    if len(token) > 1 and token.istitle():
+        return FUNCTION_WORDS.get(token.lower())
+    return None
+
+
 LETTER_NAMES = dict(zip('abcdefghijklmnopqrstuvwxyz',
     '에이 비 씨 디 이 에프 지 에이치 아이 제이 케이 엘 엠 엔 오 피 큐 알 에스 티 유 브이 더블유 엑스 와이 지'.split()))
 TECH_ABBREVIATIONS = frozenset('''
@@ -216,10 +244,16 @@ CUSTOM_TRANSFORM_INPUT = re.compile(r'[A-Za-z\d]')
 TECH_WITH_PARTICLE = re.compile(r'([A-Za-z][A-Za-z-]*)(에서도|에서는|으로|에서|에게|은|는|이|가|을|를|의|에|로|와|과|도)')
 
 
+PROSE_READINGS = {**TECH_ROOTS, **FUNCTION_WORDS}
+PROSE_READINGS.update({word.title(): reading for word, reading in FUNCTION_WORDS.items()
+                       if len(word) > 1})
+
+
 def lexical_reading(token):
     """Registered words and productive plurals; unknown machine tokens are opaque."""
-    if token in TECH_ROOTS:
-        return TECH_ROOTS[token]
+    reading = PROSE_READINGS.get(token)
+    if reading is not None:
+        return reading
     if token == 'HEAD':
         return TECH_ROOTS['head']
     if token in TECH_ABBREVIATIONS:
@@ -237,7 +271,7 @@ def lexical_reading(token):
     particle = TECH_WITH_PARTICLE.fullmatch(token)
     if particle:
         stem, ending = particle.groups()
-        if stem in TECH_ROOTS or stem in TECH_COMPONENTS or stem in TECH_ABBREVIATIONS or stem in TECH_COMPOUNDS or stem == 'HEAD':
+        if stem in TECH_ROOTS or stem in TECH_COMPONENTS or stem in TECH_ABBREVIATIONS or stem in TECH_COMPOUNDS or stem == 'HEAD' or function_reading(stem) is not None:
             return lexical_reading(stem) + ending
     return None
 
