@@ -22,10 +22,117 @@ GROUPED_INTEGER = re.compile(r'(?<![A-Za-z0-9_.,])[1-9]\d{0,2}(?:,\d{3})+(?!\d|,
 # Reproduced 46개/61개/282개/284개/1,024개 were split into smaller counts.
 # Keep correct native readings for other two-digit counts; use public cardinal TN.
 LARGE_ITEM_COUNT = re.compile(r'(?<![\w.,+/@-])(46|48|61|[1-9]\d{2,})개(?![A-Za-z0-9_./])')
-KNOWN_UNITS = {'GB': '기가바이트', 'MB': '메가바이트', 'TB': '테라바이트',
-               'kHz': '킬로헤르츠', 'kbps': '킬로비트 퍼 초', 'km/h': '킬로미터 퍼 아워'}
-NUMBER_UNIT = re.compile(r'(?<![A-Za-z0-9_.,+-])(?P<number>-?\d+(?:\.\d+)?)'
-                        r'(?P<unit>GB|MB|TB|kHz|kbps|km/h)(?![A-Za-z0-9_])')
+# Narrow custom readings for the verified units100 corpus. Case is significant:
+# b means bit and B means byte. Longest alternatives prevent suffix matches.
+KNOWN_UNITS = {
+    'ms/op': '밀리세컨드 퍼 오퍼레이션',
+    'block/day': '블록 퍼 데이', 'block/min': '블록 퍼 분', 'block/h': '블록 퍼 시간',
+    'block/s': '블록 퍼 세컨드', 'request/s': '리퀘스트 퍼 세컨드',
+    'connection/s': '커넥션 퍼 세컨드', 'process/s': '프로세스 퍼 세컨드',
+    'session/s': '세션 퍼 세컨드', 'packet/s': '패킷 퍼 세컨드',
+    'thread/s': '스레드 퍼 세컨드', 'event/s': '이벤트 퍼 세컨드',
+    'query/s': '쿼리 퍼 세컨드', 'retry/s': '리트라이 퍼 세컨드',
+    'peer/min': '피어 퍼 분', 'peer/s': '피어 퍼 세컨드',
+    'error/min': '에러 퍼 분', 'frame/s': '프레임 퍼 세컨드',
+    'write/s': '라이트 퍼 세컨드', 'read/s': '리드 퍼 세컨드',
+    'byte/s': '바이트 퍼 세컨드', 'hash/s': '해시 퍼 세컨드',
+    'node/s': '노드 퍼 세컨드', 'task/s': '태스크 퍼 세컨드',
+    'call/s': '콜 퍼 세컨드', 'fail/h': '페일 퍼 시간',
+    'tx/min': '티엑스 퍼 분', 'tx/s': '티엑스 퍼 세컨드',
+    'req/s': '알이큐 퍼 세컨드', 'msg/s': '메시지 퍼 세컨드',
+    'job/s': '잡 퍼 세컨드', 'op/s': '오퍼레이션 퍼 세컨드',
+    'km/h': '킬로미터 퍼 아워', 'm/s²': '미터 퍼 세컨드 제곱',
+    'm/s': '미터 퍼 세컨드',
+    'GB/day': '기가바이트 퍼 데이', 'TB/day': '테라바이트 퍼 데이',
+    'GB/min': '기가바이트 퍼 분', 'MB/min': '메가바이트 퍼 분',
+    'GB/s': '기가바이트 퍼 세컨드', 'MB/s': '메가바이트 퍼 세컨드',
+    'kB/s': '킬로바이트 퍼 세컨드', 'kH/s': '킬로해시 퍼 세컨드',
+    'TH/s': '테라해시 퍼 세컨드', 'GH/s': '기가해시 퍼 세컨드',
+    'MH/s': '메가해시 퍼 세컨드', 'Mbps': '메가비트 퍼 세컨드',
+    'Gbps': '기가비트 퍼 세컨드', 'kb/s': '킬로비트 퍼 세컨드',
+    'fps': '에프피에스', 'IOPS': '아이옵스', 'GiB': '기비바이트',
+    'GHz': '기가헤르츠', 'MHz': '메가헤르츠', 'kHz': '킬로헤르츠',
+    'µs': '마이크로세컨드', 'ns': '나노세컨드', 'sec': '세컨드',
+    'min': '분', 'hr': '아워', 'Hz': '헤르츠', 'km/h': '킬로미터 퍼 아워',
+    'GB': '기가바이트', 'MB': '메가바이트', 'TB': '테라바이트',
+    'kB': '킬로바이트', 'KB': '킬로바이트', 'ms': '밀리세컨드',
+    'tx': '티엑스', 'peer': '피어', 'node': '노드', 'req': '알이큐',
+    'request': '리퀘스트', 'msg': '메시지', 'packet': '패킷', 'event': '이벤트',
+    'job': '잡', 'task': '태스크', 'thread': '스레드', 'process': '프로세스',
+    'frame': '프레임', 'block': '블록', 'hash': '해시', 'byte': '바이트',
+    'bit': '비트', 'call': '콜', 'query': '쿼리', 'write': '라이트',
+    'read': '리드', 'connection': '커넥션', 'session': '세션', 'retry': '리트라이',
+    'error': '에러', 'fail': '페일', 'core': '코어', 'GHz': '기가헤르츠',
+    's': '초', 'h': '시간', 'V': '볼트', 'A': '암페어', 'W': '와트',
+    '°C': '도씨', '%': '퍼센트',
+}
+# Read one maximal compact unit token, then accept it only by exact registry
+# lookup. This keeps candidate screening independent of registry size.
+NUMBER_UNIT = re.compile(
+    r'(?<![A-Za-z0-9_.,/@:=+-])(?P<number>-?(?:\d{1,3}(?:,\d{3})+|\d+)'
+    r'(?:\.\d+)?)(?P<space>\s*)(?P<unit>[A-Za-zµ°²/%]+)'
+    r'(?![A-Za-z0-9_/@]|\.[A-Za-z0-9_])')
+NUMBER_OR_GROUPED_INTEGER = re.compile(
+    r'(?:(?<![A-Za-z0-9_.,/@:=+-])(?P<number_unit>'
+    r'(?P<unit_number>-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)'
+    r'(?P<unit_space>\s*)(?P<unit_token>[A-Za-zµ°²/%]+))'
+    r'(?![A-Za-z0-9_/@]|\.[A-Za-z0-9_])'
+    r'|(?<![A-Za-z0-9_.,+/@-])(?P<grouped_integer>'
+    r'[1-9]\d{0,2}(?:,\d{3})+)(?!\d|,\d))')
+
+# USER-confirmed readings that intentionally override ordinary unit semantics.
+# Keep these exact and case-sensitive; they must not rewrite neighboring values
+# or technical identifiers.
+USER_CONFIRMED_UNIT_READINGS = {
+    '100 kb/s': '백 킬로바이트 퍼 세컨드',
+    '225 block/s': '천 블락스 퍼 세컨드',
+    '225 blocks/s': '천 블락스 퍼 세컨드',
+    '50 mb/s': '오십메가 퍼 세컨드',
+}
+
+
+_CARDINAL_DIGITS = '영일이삼사오육칠팔구'
+_CARDINAL_SMALL = ('', '십', '백', '천')
+_CARDINAL_LARGE = ('', '만', '억', '조')
+
+
+def korean_cardinal(value):
+    """Read a non-negative integer as Korean Sino-Korean cardinal numerals."""
+    value = int(value)
+    if value == 0:
+        return '영'
+    groups = []
+    while value:
+        groups.append(value % 10000)
+        value //= 10000
+    spoken = []
+    for position, group in reversed(list(enumerate(groups))):
+        if not group:
+            continue
+        part = []
+        for place in range(3, -1, -1):
+            digit = group // (10 ** place) % 10
+            if digit:
+                part.append((_CARDINAL_SMALL[place] if digit == 1 and place else
+                             _CARDINAL_DIGITS[digit] + _CARDINAL_SMALL[place]))
+        spoken.append(''.join(part) + (_CARDINAL_LARGE[position]
+                                       if position < len(_CARDINAL_LARGE) else ''))
+    return ''.join(spoken)
+
+
+def korean_number(value):
+    """Read integer/decimal input; decimal digits are spoken one by one."""
+    value = value.replace(',', '')
+    negative = value.startswith('-')
+    if negative:
+        value = value[1:]
+    if '.' in value:
+        integer, fraction = value.split('.', 1)
+        spoken = korean_cardinal(integer) + ' 쩜 ' + ' '.join(
+            _CARDINAL_DIGITS[int(digit)] for digit in fraction)
+    else:
+        spoken = korean_cardinal(value)
+    return ('마이너스 ' if negative else '') + spoken
 # Relative filename tokens and the known digit-bearing extension remain identifiers.
 # Absolute filesystem paths have already gone through the separate path-description layer.
 KNOWN_PROTECTED = re.compile(
@@ -118,6 +225,15 @@ def normalize_with_exceptions(text, normalize):
     """
     if not text.strip():
         return text
+    if text in USER_CONFIRMED_UNIT_READINGS:
+        return USER_CONFIRMED_UNIT_READINGS[text]
+    # Exact scalar measurement tokens are common input units and need no prose
+    # protection pipeline. Keep this full-token fast path ahead of all generic
+    # exceptions; embedded values still use the guarded combined scan below.
+    scalar = NUMBER_UNIT.fullmatch(text)
+    if scalar and scalar.group('unit') in KNOWN_UNITS:
+        return (korean_number(scalar.group('number')) + ' ' +
+                KNOWN_UNITS[scalar.group('unit')])
     text = proper_names(text)
     protected = {}
     available = (chr(i) for i in range(0xE000, 0xF900) if chr(i) not in text)
@@ -142,18 +258,25 @@ def normalize_with_exceptions(text, normalize):
     text = WEEKDAY_COLLISION_PHRASE.sub(lambda match: protect(match.group()), text)
     text = SINGLE_HOUR.sub(lambda match: protect('한 시간'), text)
     text = KNOWN_PROTECTED.sub(lambda match: protect(match.group()), text)
-    # Strip commas only from syntactically valid thousands groups, not prose commas.
-    text = GROUPED_INTEGER.sub(lambda match: match.group().replace(',', ''), text)
+    # One scan handles spoken number/unit forms and valid standalone thousands groups.
+    def number_or_grouped(match):
+        if match.group('grouped_integer') is not None:
+            return match.group('grouped_integer').replace(',', '')
+        unit_name = match.group('unit_token')
+        exact = match.group('number_unit')
+        if exact in USER_CONFIRMED_UNIT_READINGS:
+            return USER_CONFIRMED_UNIT_READINGS[exact]
+        if unit_name not in KNOWN_UNITS:
+            if ',' in match.group('unit_number'):
+                return (match.group('unit_number').replace(',', '') +
+                        match.group('unit_space') + unit_name)
+            return match.group()
+        return korean_number(match.group('unit_number')) + ' ' + KNOWN_UNITS[unit_name]
+
+    text = NUMBER_OR_GROUPED_INTEGER.sub(number_or_grouped, text)
     text = LARGE_ITEM_COUNT.sub(
         lambda match: protect(normalize(match.group(1)) + ' 개'), text)
 
-    def unit(match):
-        number = normalize(match.group('number'))
-        if not number.strip():
-            raise RuntimeError('empty normalized number')
-        return protect(number + ' ' + KNOWN_UNITS[match.group('unit')])
-
-    text = NUMBER_UNIT.sub(unit, text)
     text = heard_error_readings(text)
     result = normalize(text)
     for token, value in protected.items():

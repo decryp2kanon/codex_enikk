@@ -23,7 +23,7 @@ class NormalizationTests(unittest.TestCase):
         c = tn.Client()
         c.initialize()
         self.assertIsNone(c.process)
-        self.assertEqual(c.normalize('Yuki 8 GB'), '유키 8 GB')
+        self.assertEqual(c.normalize('Yuki 8 GB'), '유키 팔 기가바이트')
         c.close()
 
     def test_core_environment_not_used(self):
@@ -213,7 +213,9 @@ class ExceptionBoundaryTests(unittest.TestCase):
 
     def test_byte_units_are_case_sensitive_and_identifiers_not_units(self):
         for text in ['8Gb', '8gb', 'test8GB', 'test_8GB', '8GBPS', 'test-8GB', '3-8GB']:
-            self.assertIsNone(tn.overrides.NUMBER_UNIT.search(text))
+            match = tn.overrides.NUMBER_UNIT.search(text)
+            self.assertTrue(match is None or match.group('unit') not in tn.overrides.KNOWN_UNITS)
+            self.assertEqual(tn.normalize(text), text)
         self.assertEqual(tn.overrides.NUMBER_UNIT.fullmatch('-8GB').group('number'), '-8')
 
 
