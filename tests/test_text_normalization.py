@@ -224,9 +224,13 @@ class CustomOnlyArchitectureTests(unittest.TestCase):
         import ast
         tree = ast.parse(Path(tn.overrides.__file__).read_text())
         imports = [node for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom))]
-        self.assertEqual(len(imports), 1)
-        self.assertIsInstance(imports[0], ast.Import)
-        self.assertEqual([alias.name for alias in imports[0].names], ['re'])
+        modules = {alias.name for node in imports if isinstance(node, ast.Import)
+                   for alias in node.names}
+        modules.update(node.module for node in imports if isinstance(node, ast.ImportFrom))
+        self.assertEqual(modules, {'re', 'functools'})
+        self.assertEqual([(node.module, [alias.name for alias in node.names])
+                          for node in imports if isinstance(node, ast.ImportFrom)],
+                         [('functools', ['lru_cache'])])
         wrapper = SOURCE.read_text()
         self.assertNotIn('HEARD_ERRORS =', wrapper)
         self.assertNotIn('KNOWN_UNITS =', wrapper)

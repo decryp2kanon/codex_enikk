@@ -1,19 +1,36 @@
-"""Yuki-specific text exceptions; independent of NVIDIA package implementation.
+"""Yuki custom input pronunciations; independent of external normalizers.
 
 Order: path descriptions (engine, once) -> narrow protection/names/units ->
 normalization callback -> checked restoration. No external runtime imports.
 Each exception's reproducer lives in test_text_normalization.py or PathTests
-in test_tts_delivery.py. General grammar, Korean G2P and voice controls are absent.
+in test_tts_delivery.py; education grammars have test_education_2_7.py fixtures.
+Korean G2P and voice controls are absent.
 """
 import re
+from functools import lru_cache
 
 # User-defined names, not a general pronunciation dictionary.
 NAMES = {'Yuki': '유키', 'Enikk': '에닉', 'Sugarchain': '슈가체인'}
+NAME_TOKEN = re.compile(
+    r'''(?<![A-Za-z0-9_./@=:#`"'()\[\]{}+-])(?:Yuki|Enikk|Sugarchain)'''
+    r'''(?![A-Za-z0-9_/@=:#`"'()\[\]{}+-]|\.[A-Za-z0-9_])''')
+NAME_LITERAL = re.compile(r'[./@_=:0-9`"\'()\[\]{}+-]')
+
+
+def surrounding_token(text, start, end):
+    """Inspect only a match's token, never rescan the preceding paragraph."""
+    while start and not text[start-1].isspace():
+        start -= 1
+    while end < len(text) and not text[end].isspace():
+        end += 1
+    return text[start:end]
 
 
 def proper_names(text):
-    return re.sub(r'(?<![A-Za-z])(?:Yuki|Enikk|Sugarchain)(?![A-Za-z])',
-                  lambda m: NAMES[m.group()], text, flags=0)
+    def replace(match):
+        token = surrounding_token(text, *match.span()).rstrip('.,!?;')
+        return match.group() if NAME_LITERAL.search(token) else NAMES[match.group()]
+    return NAME_TOKEN.sub(replace, text)
 
 
 # USER-confirmed narrow readings and protections. Case matters: GB != Gb.
@@ -82,12 +99,15 @@ NUMBER_OR_GROUPED_INTEGER = re.compile(
 
 _CARDINAL_DIGITS = '영일이삼사오육칠팔구'
 _CARDINAL_SMALL = ('', '십', '백', '천')
-_CARDINAL_LARGE = ('', '만', '억', '조')
+_CARDINAL_LARGE = ('', '만', '억', '조', '경', '해', '자', '양')
+_CARDINAL_LIMIT = 10 ** (4 * len(_CARDINAL_LARGE))
 
 
 def korean_cardinal(value):
     """Read a non-negative integer as Korean Sino-Korean cardinal numerals."""
     value = int(value)
+    if not 0 <= value < _CARDINAL_LIMIT:
+        raise ValueError('cardinal outside supported non-negative range')
     if value == 0:
         return '영'
     groups = []
@@ -104,8 +124,7 @@ def korean_cardinal(value):
             if digit:
                 part.append((_CARDINAL_SMALL[place] if digit == 1 and place else
                              _CARDINAL_DIGITS[digit] + _CARDINAL_SMALL[place]))
-        spoken.append(''.join(part) + (_CARDINAL_LARGE[position]
-                                       if position < len(_CARDINAL_LARGE) else ''))
+        spoken.append(''.join(part) + _CARDINAL_LARGE[position])
     return ''.join(spoken)
 
 
@@ -122,6 +141,122 @@ def korean_number(value):
     else:
         spoken = korean_cardinal(value)
     return ('마이너스 ' if negative else '') + spoken
+
+
+# 작성자: 에닉(유키짱)
+# Complete numeric inputs only; technical literals in prose keep existing rules.
+PLAIN_NUMBER = re.compile(r'[+-]?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?|[+-]?[1-9][0-9]{0,2}(?:,[0-9]{3})+(?:\.[0-9]+)?')
+
+
+def scalar_number(text):
+    value = text.strip()
+    if len(value) <= 100 and PLAIN_NUMBER.fullmatch(value):
+        integer = value.lstrip('+-').split('.')[0].replace(',', '')
+        if len(integer) <= 32:
+            spoken = ('플러스 ' + korean_number(value[1:]) if value.startswith('+') else korean_number(value))
+            return text[:len(text)-len(text.lstrip())] + spoken + text[len(text.rstrip()):]
+    return None
+# 작성자: 에닉(유키짱)
+# Lexical roots: shared across prose, plurals and registered compound concepts.
+TECH_ROOTS = dict(item.split('=', 1) for item in '''
+block=블록 wallet=월렛 key=키 node=노드 value=밸류 transaction=트랜잭션 peer=피어 hash=해시 chain=체인 json=제이슨
+script=스크립트 address=어드레스 input=인풋 output=아웃풋 coin=코인 mem=멤 pool=풀 pub=퍼브
+fee=피 time=타임 amount=어마운트 v=브이 out=아웃 in=인 height=하이트 version=버전 consensus=컨센서스 tip=팁
+message=메시지 request=리퀘스트 state=스테이트 index=인덱스 byte=바이트 buffer=버퍼 param=파라미터 entry=엔트리
+result=리절트 check=체크 error=에러 lock=락 path=패스 file=파일 data=데이터 count=카운트 name=네임 context=컨텍스트
+span=스팬 invalid=인밸리드 valid=밸리드 number=넘버 network=네트워크 mining=마이닝 miner=마이너 nonce=논스
+header=헤더 merkle=머클 signature=시그니처 verify=베리파이 relay=릴레이 orphan=오펀 checkpoint=체크포인트
+ difficulty=디피컬티 target=타깃 proof=프루프 work=워크 seed=시드 socket=소켓 protocol=프로토콜 packet=패킷 ban=밴
+connection=커넥션 inbound=인바운드 outbound=아웃바운드 sync=싱크 download=다운로드 upload=업로드 cache=캐시
+ database=데이터베이스 level=레벨 db=디비 serialize=시리얼라이즈 deserialize=디시리얼라이즈 stream=스트림 thread=스레드
+mutex=뮤텍스 atomic=아토믹 event=이벤트 queue=큐 policy=폴리시 dust=더스트 change=체인지 sig=시그 witness=위트니스
+seg=세그 wit=위트 subsidy=섭시디 re=리 org=오그 git=깃 clone=클론 init=이닛 add=애드 status=스테이터스
+ diff=디프 log=로그 show=쇼 branch=브랜치 switch=스위치 checkout=체크아웃 merge=머지 rebase=리베이스 reset=리셋
+restore=리스토어 fetch=페치 pull=풀 push=푸시 remote=리모트 origin=오리진 upstream=업스트림 tag=태그 stash=스태시
+cherry=체리 pick=픽 revert=리버트 bisect=바이섹트 blame=블레임 grep=그렙 clean=클린 archive=아카이브 tree=트리
+submodule=서브모듈 config=컨피그 commit=커밋 amend=어멘드 squash=스쿼시 fix=픽스 up=업 head=헤드 main=메인
+master=마스터 develop=디벨롭 feature=피처 release=릴리스 hot=핫 fork=포크 repository=리포지터리 repo=레포 issue=이슈
+review=리뷰 approve=어프루브 base=베이스 conflict=컨플릭트 resolve=리졸브 ours=아워스 theirs=데어스 stage=스테이지
+unstage=언스테이지 tracked=트랙트 untracked=언트랙트 ignored=이그노어드 working=워킹 detached=디태치드 fast=패스트
+forward=포워드 force=포스 with=위드 lease=리스 prune=프룬 describe=디스크라이브 rev=레브 parse=파스 cat=캣
+object=오브젝트 update=업데이트 read=리드 write=라이트 symbolic=심볼릭 ref=레프 for=포 each=이치 apply=어플라이
+format=포맷 patch=패치 send=센드 email=이메일 note=노트 hook=훅 pre=프리 flow=플로 action=액션 runner=러너
+artifact=아티팩트 milestone=마일스톤 label=레이블 assignee=어사이니 project=프로젝트 discussion=디스커션
+ touch=터치 less=레스 more=모어 tail=테일 sed=세드 awk=오크 find=파인드 args=아그스 sort=소트 uniq=유니크 cut=컷
+tee=티 print=프린트 echo=에코 date=데이트 which=위치 where=웨어 is=이즈 locate=로케이트 stat=스탯 mount=마운트
+sudo=수도 su=에스유 id=아이디 who=후 am=앰 i=아이 group=그룹 top=톱 kill=킬 nice=나이스 job=잡 screen=스크린
+ system=시스템 journal=저널 host=호스트 ping=핑 curl=컬 tar=타르 zip=집 snap=스냅 make=메이크 trace=트레이스
+perf=퍼프 free=프리 export=익스포트 source=소스 bash=배시 no=노 hup=헙 ctl=씨티엘 get=겟 un=언
+kernel=커널 primitive=프리미티브 util=유틸 crypto=크립토 test=테스트 bench=벤치 functional=펑셔널 fuzz=퍼즈
+contrib=컨트리브 dev=데브 tool=툴 depends=디펜즈 package=패키지 bitcoin=비트코인 chainstate=체인스테이트 debug=디버그 text=텍스트
+'''.split())
+LETTER_NAMES = dict(zip('abcdefghijklmnopqrstuvwxyz',
+    '에이 비 씨 디 이 에프 지 에이치 아이 제이 케이 엘 엠 엔 오 피 큐 알 에스 티 유 브이 더블유 엑스 와이 지'.split()))
+TECH_ABBREVIATIONS = frozenset('''
+txid utxo rpc ls cd pwd cp mv rm mkdir rmdir tr wc du df lsblk blkid chmod chown chgrp passwd ps bg fg
+ tmux dmesg ip ss ssh scp rsync apt dpkg gcc gdb lsof vmstat iostat env sh qt src
+'''.split())
+# Only registered compounds can be decomposed; arbitrary branch/identifier names cannot.
+TECH_COMPOUNDS = frozenset('''
+cherry-pick pull-request request-changes merge-base index-file working-tree fast-forward force-with-lease
+rev-parse ls-files ls-tree cat-file hash-object update-index read-tree write-tree commit-tree symbolic-ref
+for-each-ref show-ref merge-tree format-patch send-email pre-commit pre-push release-note
+'''.split())
+TECH_COMPONENTS = dict(item.split('=', 1) for item in '''
+mempool=mem+pool pubkey=pub+key vout=v+out vin=v+in leveldb=level+db scriptpubkey=script+pub+key scriptSig=script+sig
+segwit=seg+wit coinbase=coin+base reorg=re+org worktree=work+tree fixup=fix+up hotfix=hot+fix reflog=ref+log
+workflow=work+flow xargs=x+args printf=print+f whereis=where+is umount=u+mount whoami=who+am+i htop=h+top
+pkill=p+kill pgrep=p+grep renice=re+nice nohup=no+hup systemctl=system+ctl journalctl=journal+ctl uname=u+name
+hostname=host+name wget=w+get gzip=g+zip gunzip=g+un+zip unzip=un+zip cmake=c+make strace=s+trace uptime=up+time devtools=dev+tools
+'''.split())
+TECH_PROSE_TOKEN = re.compile(r'```[\s\S]*?```|`[^`]*`|\S+')
+TECH_ASCII = re.compile('[A-Za-z]')
+CODE_LITERAL = re.compile(r'```[\s\S]*?(?:```|$)|`[^`]*(?:`|$)')
+CUSTOM_TRANSFORM_INPUT = re.compile(r'[A-Za-z\d]')
+TECH_WITH_PARTICLE = re.compile(r'([A-Za-z][A-Za-z-]*)(에서도|에서는|으로|에서|에게|은|는|이|가|을|를|의|에|로|와|과|도)')
+
+
+def lexical_reading(token):
+    """Registered words and productive plurals; unknown machine tokens are opaque."""
+    if token in TECH_ROOTS:
+        return TECH_ROOTS[token]
+    if token == 'HEAD':
+        return TECH_ROOTS['head']
+    if token in TECH_ABBREVIATIONS:
+        return ''.join(LETTER_NAMES[letter] for letter in token)
+    if token in TECH_COMPONENTS:
+        return ''.join(lexical_reading(part) or LETTER_NAMES.get(part, part)
+                        for part in TECH_COMPONENTS[token].split('+'))
+    if token in TECH_COMPOUNDS:
+        return ' '.join(lexical_reading(part) or part for part in token.split('-'))
+    for suffix in ('es', 's'):
+        if token.endswith(suffix):
+            stem = token[:-len(suffix)]
+            if stem in TECH_ROOTS or stem in TECH_COMPONENTS or stem in TECH_ABBREVIATIONS:
+                return lexical_reading(stem) + '스'
+    particle = TECH_WITH_PARTICLE.fullmatch(token)
+    if particle:
+        stem, ending = particle.groups()
+        if stem in TECH_ROOTS or stem in TECH_COMPONENTS or stem in TECH_ABBREVIATIONS or stem in TECH_COMPOUNDS or stem == 'HEAD':
+            return lexical_reading(stem) + ending
+    return None
+
+
+def technical_prose(text):
+    # Single registry scan. Literal dots, slashes, underscores, options and
+    # embedded code delimiters never match a registered word.
+    if not TECH_ASCII.search(text):
+        return text
+    def replace(match):
+        raw = match.group()
+        if raw.startswith('`'):
+            return raw
+        token = raw.rstrip(',!?;')
+        punctuation = raw[len(token):]
+        if token.endswith('.') and token.count('.') == 1:
+            token, punctuation = token[:-1], '.' + punctuation
+        return (lexical_reading(token) or token) + punctuation
+    return TECH_PROSE_TOKEN.sub(replace, text)
 # Relative filename tokens and the known digit-bearing extension remain identifiers.
 # Absolute filesystem paths have already gone through the separate path-description layer.
 KNOWN_PROTECTED = re.compile(
@@ -205,12 +340,13 @@ def heard_error_readings(text):
     return HEARD_TOKEN.sub(replace, text)
 
 
-def normalize_with_exceptions(text, normalize):
-    """Protect reproduced errors, run public TN, restore only our own exact spans.
+def normalize_with_exceptions(text, normalize=None):
+    """Read custom grammar, optionally call a normalizer, and restore our spans.
 
     Each transformed span is normalized once. Opaque markers never reach the GPU.
     The private-use markers are chosen outside the input and checked for loss or
     duplication rather than repairing arbitrary words in the final output.
+    Omitting the callback explicitly selects the independent custom-only path.
     """
     if not text.strip():
         return text
@@ -219,9 +355,23 @@ def normalize_with_exceptions(text, normalize):
     # exceptions; embedded values still use the guarded combined scan below.
     scalar = NUMBER_UNIT.fullmatch(text)
     if scalar and scalar.group('unit') in KNOWN_UNITS:
-        return (korean_number(scalar.group('number')) + ' ' +
-                KNOWN_UNITS[scalar.group('unit')])
-    text = proper_names(text)
+        value = scalar.group('number')
+        if len(value) <= 32 or len(value.lstrip('-').split('.')[0].replace(',', '')) <= 32:
+            return korean_number(value) + ' ' + KNOWN_UNITS[scalar.group('unit')]
+        return text
+    if text.lstrip()[:1] in '+-0123456789':
+        numeric = scalar_number(text)
+        if numeric is not None:
+            return numeric
+    reading = lexical_reading(text)
+    if reading is not None:
+        return reading
+    if normalize is None:
+        # All custom transformations require a Latin name/word or a numeral.
+        # Pure Korean path descriptions need no protect/restore identity pass.
+        if not CUSTOM_TRANSFORM_INPUT.search(text):
+            return text
+        normalize = lambda value: value
     protected = {}
     available = (chr(i) for i in range(0xE000, 0xF900) if chr(i) not in text)
 
@@ -231,6 +381,10 @@ def normalize_with_exceptions(text, normalize):
             raise ValueError('too many protected normalization spans')
         protected[token] = value
         return token
+
+    if '`' in text:
+        text = CODE_LITERAL.sub(lambda match: protect(match.group()), text)
+    text = proper_names(text)
 
     text = WORK_NOUN_PHRASE.sub(lambda match: protect(match.group()), text)
     text = FEW_SECONDS_SUBJECT.sub(lambda match: protect(match.group()), text)
@@ -255,6 +409,8 @@ def normalize_with_exceptions(text, normalize):
                 return (match.group('unit_number').replace(',', '') +
                         match.group('unit_space') + unit_name)
             return match.group()
+        if len(match.group('unit_number').lstrip('-').split('.')[0].replace(',', '')) > 32:
+            return match.group()
         return korean_number(match.group('unit_number')) + ' ' + KNOWN_UNITS[unit_name]
 
     text = NUMBER_OR_GROUPED_INTEGER.sub(number_or_grouped, text)
@@ -262,12 +418,90 @@ def normalize_with_exceptions(text, normalize):
         lambda match: protect(normalize(match.group(1)) + ' 개'), text)
 
     text = heard_error_readings(text)
-    result = normalize(text)
+    result = normalize(technical_prose(text))
     for token, value in protected.items():
         if result.count(token) != 1:
             raise RuntimeError('protected normalization span lost or duplicated')
         result = result.replace(token, value)
     return result
+
+
+PATH_EXTENSIONS = {
+    'py': '파이썬 파일', 'md': '마크다운 파일', 'sh': '셸 스크립트',
+    'json': '제이슨 파일', 'txt': '텍스트 파일', 'wav': '웨이브 오디오 파일',
+    'log': '로그 파일', 'dat': '데이터 파일', 'conf': '설정 파일',
+    'toml': '톰엘 설정 파일', 'yaml': '야믈 설정 파일',
+    'yml': '야믈 설정 파일', 'cpp': '씨 플러스 플러스 소스 파일',
+    'cc': '씨 플러스 플러스 소스 파일', 'h': '헤더 파일', 'hpp': '헤더 파일',
+    'rs': '러스트 소스 파일', 'js': '자바스크립트 파일', 'ts': '타입스크립트 파일',
+}
+PATH_NAMES = {'yuki': '유키', 'engine': '엔진', 'enikk': '에닉', 'readme': '리드미',
+         'install': '인스톨', 'license': '라이선스', 'changelog': '체인지로그',
+         'makefile': '메이크파일', 'chatterbox': '채터박스', 'test': '테스트', 'output': '아웃풋',
+         'approval': '승인', 'marker': '표시'}
+# Delimited paths may contain Korean filenames. Attached Korean particles
+# after a known extension are prose, not part of that filename.
+PATH_PATTERN = re.compile(
+    r"(?<![\w/:.])(?P<path>`?(?:(?:/(?:home|tmp|usr|etc|var|opt)/|~/|\.\.?/)[^\s`\"'<>()[\]{}]+"
+    r"|(?P<known_report>(?<![@-])report_v31\.1\.md(?![A-Za-z0-9_-]|\.[A-Za-z0-9_])))`?)"
+    r"(?(known_report)(?:(?P<filename_particle>으로|에서|을|를|은|는|이|가|에|로|와|과|도)(?=\s|[.!?,]|$))?|)"
+    r"(?:\s+(?:파일|경로)(?P<particle>에서|으로|을|를|은|는|이|가|에|로|(?(known_report)도|(?!)))?(?=\s|[.!?,]|$))?")
+
+@lru_cache(maxsize=256)
+def path_component(value):
+    """Bounded cache of component readings, never complete source paths."""
+    hidden = value.startswith('.')
+    value = value[1:] if hidden else value
+    if re.fullmatch('[0-9a-fA-F]{16,}', value) or len(value) > 48:
+        return ('숨김 ' if hidden else '') + '식별자'
+    local_names = {'home': '홈', 'sugarchain': '슈가체인', 'readme': '리드미'}
+    tokens = []
+    for token in re.split('[-_]', value):
+        if re.fullmatch(r'v[0-9]+(?:\.[0-9]+)*', token):
+            numbers = token[1:].split('.')
+            tokens.append('버전 ' + ('식별자' if any(len(n) > 32 for n in numbers) else
+                          ' 쩜 '.join(' '.join(_CARDINAL_DIGITS[int(d)] for d in n)
+                                     if len(n) > 1 and n.startswith('0') else korean_cardinal(int(n))
+                                     for n in numbers)))
+        else:
+            read = (local_names.get(token.lower()) or PATH_NAMES.get(token.lower()) or
+                    lexical_reading(token))
+            if read is None and token.isascii() and token.isalpha():
+                read = ''.join(LETTER_NAMES[char.lower()] for char in token)
+            tokens.append(read or token)
+    return ('숨김 ' if hidden else '') + ' '.join(tokens)
+
+
+def project_path_description(path, extensions):
+    """Describe a project path structurally without resolving or reading disk.
+
+    Preserve every traversal component. Other path families retain the existing
+    basename description policy. This is an opt-in project vocabulary scope,
+    never an exact path lookup.
+    """
+    parts = path.split('/')
+    if not any(part in ('sugarchain', '.sugarchain', 'bitcoin', '.bitcoin') for part in parts):
+        return None
+    spoken = []
+    if path.startswith('/'):
+        spoken.append('루트 디렉터리')
+    nonempty = [part for part in parts if part]
+    for index, part in enumerate(nonempty):
+        if part == '~':
+            spoken.append('홈 디렉터리')
+        elif part == '..':
+            spoken.append('상위 디렉터리')
+        elif part == '.':
+            spoken.append('현재 디렉터리')
+        elif index == len(nonempty)-1 and not path.endswith('/'):
+            stem, dot, extension = part.rpartition('.')
+            if dot and stem and extension.isalpha():
+                spoken.append(path_component(stem) + ' ' + extensions.get(extension.lower(), '파일'))
+            else:
+                spoken.append(path_component(part) + ' 디렉터리')
+        else:
+            spoken.append(path_component(part))
+    return ' 아래 '.join(spoken) + ' 경로'
 
 
 def normalize_paths(text):
@@ -276,29 +510,14 @@ def normalize_paths(text):
     Return explicit replacements as well as text; never mutate the source job.
     URLs and ordinary slash expressions cannot start a match.
     """
-    extensions = {
-        'py': '파이썬 파일', 'md': '마크다운 파일', 'sh': '셸 스크립트',
-        'json': '제이슨 파일', 'txt': '텍스트 파일', 'wav': '웨이브 오디오 파일',
-        'log': '로그 파일', 'toml': '톰엘 설정 파일', 'yaml': '야믈 설정 파일',
-        'yml': '야믈 설정 파일', 'cpp': '씨 플러스 플러스 소스 파일',
-        'cc': '씨 플러스 플러스 소스 파일', 'h': '헤더 파일', 'hpp': '헤더 파일',
-        'rs': '러스트 소스 파일', 'js': '자바스크립트 파일', 'ts': '타입스크립트 파일',
-    }
-    names = {'yuki': '유키', 'engine': '엔진', 'enikk': '에닉', 'readme': '리드미',
-             'install': '인스톨', 'license': '라이선스', 'changelog': '체인지로그',
-             'makefile': '메이크파일', 'chatterbox': '채터박스', 'test': '테스트', 'output': '아웃풋',
-             'approval': '승인', 'marker': '표시'}
-    # Delimited paths may contain Korean filenames. Attached Korean particles
-    # after a known extension are prose, not part of that filename.
-    pattern = re.compile(
-        r"(?<![\w/:.])(?P<path>`?(?:(?:/(?:home|tmp|usr|etc|var|opt)/|~/|\.\.?/)[^\s`\"'<>()[\]{}]+"
-        r"|(?P<known_report>(?<![@-])report_v31\.1\.md(?![A-Za-z0-9_-]|\.[A-Za-z0-9_])))`?)"
-        r"(?(known_report)(?:(?P<filename_particle>으로|에서|을|를|은|는|이|가|에|로|와|과|도)(?=\s|[.!?,]|$))?|)"
-        r"(?:\s+(?:파일|경로)(?P<particle>에서|으로|을|를|은|는|이|가|에|로|(?(known_report)도|(?!)))?(?=\s|[.!?,]|$))?")
+    extensions, names, pattern = PATH_EXTENSIONS, PATH_NAMES, PATH_PATTERN
     records = []
 
     def replace(match):
         raw = match.group('path')
+        surrounding = surrounding_token(text, *match.span())
+        if '://' in surrounding or '@' in surrounding:
+            return match.group()
         path = raw.strip('`')
         tail = ''
         while path and path[-1] in '.,!?:;':
@@ -319,16 +538,12 @@ def normalize_paths(text):
         spoken = '' if machine else ' '.join(names.get(token.lower(), token)
                                              for token in re.split(r'[-_.]+', stem) if token)
         if basename == 'report_v31.1.md':
-            if '/' not in path:
-                surrounding = (re.search(r'\S*$', text[:match.start()]).group()
-                               + match.group() + re.match(r'\S*', text[match.end():]).group())
-                if '://' in surrounding or '@' in surrounding:
-                    return match.group()
             # USER-confirmed bad filename reading; preserve original/span accounting.
             # Keep version digits unchanged, and do not rewrite ordinary 'report'.
             spoken = '리포트 버전 31 점 1'
         kind = '경로' if '/' in path else ''
-        result = ' '.join(filter(None, (spoken, description, kind)))
+        result = (project_path_description(path, extensions) or
+                  ' '.join(filter(None, (spoken, description, kind))))
         tail += match.group('filename_particle') or match.group('particle') or ''
         if not kind:
             tail = re.sub(r'^(를|는|가|와)', lambda m: {'를': '을', '는': '은', '가': '이', '와': '과'}[m[0]], tail)
@@ -340,3 +555,5 @@ def normalize_paths(text):
 
     normalized = pattern.sub(replace, text)
     return normalized, records
+
+# EOF

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# 작성자: 에닉(유키짱)
 """Yuki custom text normalization only."""
 import importlib.util
 from pathlib import Path
@@ -25,6 +26,9 @@ class Client:
             raise TypeError("text must be str")
         if len(text.encode("utf-8")) > 1024 * 1024:
             raise ValueError("normalization request too large")
+        if self.custom is overrides:
+            return self.custom.normalize_with_exceptions(text)
+        # Preserve the callback contract for pre-existing injected custom modules.
         return self.custom.normalize_with_exceptions(text, lambda value: value)
 
     def close(self):
@@ -38,3 +42,5 @@ close = _service.close
 if __name__ == "__main__":
     initialize()
     close()
+
+# EOF
