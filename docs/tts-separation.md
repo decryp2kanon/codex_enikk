@@ -15,6 +15,7 @@ download models, alter the existing venv/reference, or start Codex.
 codex_enikk
 enikk_tts start
 enikk_tts status
+enikk_tts --tts-debug
 enikk_tts stop
 enikk_tts restart
 enikk_tts update /home/ak/git/codex_enikk
@@ -29,6 +30,10 @@ Voice dependencies remain in `~/Apps/chatterbox-yuki/.venv`, with the existing
 No installer here calls the legacy `tts/setup-tts.sh`.
 `codex_enikk --tts-debug` prints the independent status/log commands; it no longer
 starts or owns a voice worker.
+
+`enikk_tts --tts-debug` follows the current notify/engine log with `tail -F`,
+switches to the new run after a voice restart, and prints readiness/error changes.
+Ctrl+C closes only the viewer. It does not start, stop or restart either service.
 
 ## Ownership and release boundary
 

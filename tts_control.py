@@ -9,15 +9,68 @@ import sys
 
 UNIT = 'enikk-tts.service'
 
+def debug_logs():
+    """Read-only tail that follows the active voice generation across restarts."""
+    import time
+    state = Path(os.environ.get('ENIKK_TTS_STATE',
+        str(Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'enikk_tts')))
+    tail = None
+    current = None
+    previous_status = None
+    def stop_tail():
+        nonlocal tail
+        if tail and tail.poll() is None:
+            tail.terminate()
+            try: tail.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                tail.kill()
+                tail.wait()
+        tail = None
+    print('Enikk TTS logs — Ctrl+C exits the viewer only.', flush=True)
+    try:
+        while True:
+            try:
+                value = json.loads((state / 'status.json').read_text())
+            except (OSError, ValueError):
+                value = {}
+            status = (value.get('state', 'waiting_for_status'), value.get('last_error'),
+                      value.get('generation'))
+            if status != previous_status:
+                print(f'\n[TTS] state={status[0]} generation={status[2]} error={status[1]}', flush=True)
+                previous_status = status
+            path = None
+            if isinstance(value.get('run'), str):
+                run = Path(value['run']).resolve()
+                if run.is_relative_to((state / 'runs').resolve()):
+                    path = run / 'notify.log'
+            if path != current:
+                stop_tail()
+                current = path
+            if path and path.is_file() and (tail is None or tail.poll() is not None):
+                print(f'[TTS] following {path}', flush=True)
+                tail = subprocess.Popen(['tail', '-n', '80', '-F', '--sleep-interval=0.2',
+                    '--max-unchanged-stats=1', '--', str(path)])
+            time.sleep(.5)
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        stop_tail()
+
+
 def main():
     os.environ.setdefault('XDG_RUNTIME_DIR', '/run/user/' + str(os.getuid()))
     os.environ.setdefault('DBUS_SESSION_BUS_ADDRESS', 'unix:path=' + os.environ['XDG_RUNTIME_DIR'] + '/bus')
     command = sys.argv[1] if len(sys.argv) > 1 else 'status'
+    if command == '--tts-debug':
+        return debug_logs()
+    if command in ('--help', '-h'):
+        print('enikk_tts start|stop|restart|status|--tts-debug|update SOURCE|rollback RELEASE')
+        return 0
     if command in ('update', 'rollback'):
         from tts_release import main as release
         return release(sys.argv[1:])
     if command not in ('start', 'stop', 'restart', 'status'):
-        print('enikk_tts start|stop|restart|status|update SOURCE|rollback RELEASE')
+        print('enikk_tts start|stop|restart|status|--tts-debug|update SOURCE|rollback RELEASE')
         return 2
     if command == 'status':
         state = Path(os.environ.get('ENIKK_TTS_STATE',
