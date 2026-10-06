@@ -26,12 +26,13 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(tn.overrides.proper_names('Yuki Enikk Sugarchain Python CUDA YukiXYZ'),
                          '유키 에닉 슈가체인 Python CUDA YukiXYZ')
 
-    def test_missing_environment_fails_closed(self):
-        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, CODEX_ENIKK_TN_HOME=d):
+    def test_missing_upstream_environment_defaults_custom_only(self):
+        with tempfile.TemporaryDirectory() as d, patch.dict(
+                os.environ, {'CODEX_ENIKK_TN_HOME': d}, clear=True):
             c = tn.Client()
-            with self.assertRaisesRegex(RuntimeError, 'environment missing'):
-                c.initialize()
+            c.initialize()
             self.assertIsNone(c.process)
+            self.assertEqual(c.normalize('Yuki 8 GB'), '유키 8 GB')
 
     def test_failed_child_never_claims_ready(self):
         c = load_nemo_adapter().Client()
@@ -503,7 +504,7 @@ class LayerSeparationTests(unittest.TestCase):
         self.assertNotIn('nemo_text_processing', wrapper)
         self.assertNotIn('nemo_text_processing', orchestrator)
         self.assertIn('from nemo_text_processing.text_normalization.normalize import Normalizer', adapter)
-        self.assertIn("os.environ.get('CODEX_ENIKK_TTS_UPSTREAM', '1') != '0'", orchestrator)
+        self.assertIn("os.environ.get('CODEX_ENIKK_TTS_UPSTREAM', '0') != '0'", orchestrator)
         self.assertNotIn('HEARD_ERRORS =', wrapper)
         self.assertNotIn('KNOWN_UNITS =', wrapper)
 
@@ -518,7 +519,7 @@ class LayerSeparationTests(unittest.TestCase):
 
     def test_custom_only_setup_skips_nemo_preparation(self):
         setup = (SOURCE.parent / 'setup-tts.sh').read_text()
-        self.assertIn('CODEX_ENIKK_TTS_UPSTREAM:-1', setup)
+        self.assertIn('CODEX_ENIKK_TTS_UPSTREAM:-0', setup)
         self.assertIn('NeMo upstream disabled; keeping TTS setup custom-only.', setup)
         nemo_setup = (SOURCE.parent / 'setup-nemo-tn.sh').read_text()
         self.assertIn('CODEX_ENIKK_TTS_UPSTREAM=1', nemo_setup)

@@ -10,7 +10,7 @@ import sys
 
 
 def upstream_enabled():
-    return os.environ.get('CODEX_ENIKK_TTS_UPSTREAM', '1') != '0'
+    return os.environ.get('CODEX_ENIKK_TTS_UPSTREAM', '0') != '0'
 
 
 def _load_source(path, module_name):

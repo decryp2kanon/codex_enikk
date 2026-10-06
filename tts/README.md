@@ -201,7 +201,7 @@ initialization. Set `CODEX_ENIKK_TTS_UPSTREAM=0` to disable NeMo and every other
 upstream normalizer together; TTS setup then skips NeMo environment preparation
 and normalization uses only Yuki custom exceptions. That mode does not import
 NeMo or the selected 9-token dictionary, and works if the NeMo adapter and
-helper path are absent. The default `1` preserves the enabled path.
+helper path are absent. The default is `0`, so custom-only mode is used unless `CODEX_ENIKK_TTS_UPSTREAM=1` is explicitly set.
 Readiness, writes and replies have bounded deadlines; failures are explicit,
 with no fallback to the old pronunciation tables. Codex remains usable if TTS
 initialization fails.
