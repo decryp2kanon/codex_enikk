@@ -374,6 +374,112 @@ def heard_error_readings(text):
     return HEARD_TOKEN.sub(replace, text)
 
 
+# 작성자: 에닉(유키짱)
+# Symbol atoms and longest-match operators are shared across unseen combinations.
+SYMBOL_ATOMS = dict(zip('#*_ -+=><:;.,/\\|&!?@$%^~`\'"()[]{}'.replace(' ', ''),
+    ['해시', '별표', '밑줄', '마이너스', '플러스', '등호', '크다', '작다',
+     '콜론', '세미콜론', '마침표', '쉼표', '슬래시', '백슬래시', '파이프',
+     '앰퍼샌드', '느낌표', '물음표', '골뱅이', '달러', '퍼센트', '캐럿',
+     '물결', '백틱', '작은따옴표', '큰따옴표', '여는 소괄호', '닫는 소괄호',
+     '여는 대괄호', '닫는 대괄호', '여는 중괄호', '닫는 중괄호']))
+SYMBOL_OPERATORS = {
+    '===': '엄격한 동등 비교', '!==': '엄격한 비동등 비교',
+    '==': '동등 비교', '!=': '비동등 비교', '>=': '크거나 같다', '<=': '작거나 같다',
+    '&&': '논리 앤드', '||': '논리 오어', '++': '증가 연산자',
+    '->>': '오른쪽 이중 화살표', '<<-': '왼쪽 이중 화살표',
+    '<=>': '양방향 이중 화살표', '<->': '양방향 화살표',
+    '->': '오른쪽 화살표', '<-': '왼쪽 화살표', '=>': '오른쪽 이중선 화살표',
+    '>>>': '부호 없는 오른쪽 시프트', '>>': '오른쪽 시프트', '<<': '왼쪽 시프트',
+    '::': '이중 콜론', '...': '말줄임표', '??': '널 병합 연산자', '?.': '옵셔널 체이닝',
+    '<!-- -->': '빈 에이치티엠엘 주석', '<!--': '에이치티엠엘 주석 시작',
+    '-->': '에이치티엠엘 주석 끝', '</>': '빈 닫는 태그', '</': '닫는 태그 시작',
+    '/>': '자기 닫힘 태그 끝', '()': '소괄호 쌍', '[]': '대괄호 쌍',
+    '{}': '중괄호 쌍', '<>': '꺾쇠괄호 쌍',
+}
+SYMBOL_DIRECT = {atom * count: name + (' ' + korean_cardinal(str(count)) + ' 개' if count > 1 else '')
+                 for atom, name in SYMBOL_ATOMS.items() for count in range(1, 9)}
+SYMBOL_DIRECT.update(SYMBOL_OPERATORS)
+PROSE_READINGS.update(SYMBOL_DIRECT)
+SYMBOL_KEYS = tuple(sorted(SYMBOL_OPERATORS, key=lambda key: (-len(key), key)))
+SYMBOL_HINT = re.compile(r'[#*_+=<>:;.,/\\|&!?@$%^~`\'"()\[\]{}-]')
+SYMBOL_OR_CUSTOM = re.compile(r'[A-Za-z0-9#*_+=<>:;.,/\\|&!?@$%^~`\'"()\[\]{}-]')
+SYMBOL_WORD = re.compile(r'(?<!\S)\S+(?!\S)')
+CODE_EXPRESSION = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\s*(?:===|!==|==|!=|<=|>=|=|<|>|&&|\|\|)\s*[A-Za-z_0-9][A-Za-z0-9_]*;?')
+MARKDOWN_HEADING = re.compile(r'(?m)^(#{1,6})[ \t]+(.+)$')
+
+
+def symbol_reading(token):
+    direct = SYMBOL_DIRECT.get(token)
+    if direct is not None:
+        return direct
+    if not token or any(ch not in SYMBOL_ATOMS for ch in token):
+        return None
+    # Repeated identical markers are counts, not a row-specific lookup.
+    if len(set(token)) == 1:
+        if len(token) == 1:
+            return SYMBOL_ATOMS[token]
+        return SYMBOL_ATOMS[token[0]] + ' ' + korean_cardinal(str(len(token))) + ' 개'
+    result = []
+    index = 0
+    while index < len(token):
+        key = next((key for key in SYMBOL_KEYS if token.startswith(key, index)), None)
+        if key:
+            result.append(SYMBOL_OPERATORS[key]); index += len(key)
+        else:
+            result.append(SYMBOL_ATOMS[token[index]]); index += 1
+    return ' '.join(result)
+
+
+def symbol_prose(text):
+    # Only space-separated symbol tokens; machine literals remain maximal tokens.
+    # A backtick-bearing mixed input is code and keeps the existing protection.
+    if not SYMBOL_HINT.search(text):
+        return text
+    isolated = symbol_reading(text.strip())
+    if isolated is not None:
+        return isolated
+    if '`' in text:
+        return text
+    text = MARKDOWN_HEADING.sub(lambda m: korean_cardinal(str(len(m[1]))) + ' 단계 제목 ' + m[2], text)
+    return SYMBOL_WORD.sub(lambda m: symbol_reading(m[0]) or m[0], text)
+
+
+def markdown_spoken(text):
+    """Called before decoration removal; complete code blocks remain hidden."""
+    isolated = symbol_reading(text.strip())
+    if isolated is not None:
+        return isolated
+    if not any(marker in text for marker in ('#', '*', '_', '~', '`', '<')):
+        return text
+    # Complete/unfinished fences are never reintroduced into speech.
+    text = re.sub(r'(?m)^\s*(```|~~~)[^\n]*\n[\s\S]*?(?:^\s*\1[^\n]*$|\Z)', ' ', text)
+    inline = {}
+    available = (chr(i) for i in range(0xE000, 0xF900) if chr(i) not in text)
+    def protect_inline(match):
+        marker = next(available, None)
+        if marker is None:
+            raise ValueError('too many inline code spans')
+        inline[marker] = match[0]
+        return marker
+    text = re.sub(r'`[^`]*(?:`|$)', protect_inline, text)
+    text = MARKDOWN_HEADING.sub(lambda m: korean_cardinal(str(len(m[1]))) + ' 단계 제목 ' + m[2], text)
+    text = re.sub(r'<!--([\s\S]*?)-->', lambda m: ' 에이치티엠엘 주석 ' + m[1] + ' 주석 끝 ', text)
+    text = re.sub(r'</?([A-Za-z][A-Za-z0-9-]*)\s*/?>',
+                  lambda m: (' 닫는 태그 ' if m[0].startswith('</') else ' 여는 태그 ') + m[1] + ' ', text)
+    # Restrict emphasis to non-identifier boundaries and a non-empty body.
+    for marker, label in [('***', '굵게 기울임'), ('___', '굵게 기울임'),
+                          ('**', '굵게'), ('__', '굵게'), ('~~', '취소선'),
+                          ('*', '기울임'), ('_', '기울임')]:
+        if marker not in text:
+            continue
+        escaped = re.escape(marker)
+        pattern = r'(?<!\S)' + escaped + r'([^\n]+?)' + escaped + r'(?![\w*~_`])'
+        text = re.sub(pattern, lambda m: label + ' ' + m[1] + ' 강조 끝', text)
+    for marker, raw in inline.items():
+        text = text.replace(marker, raw)
+    return text
+
+
 def normalize_with_exceptions(text, normalize=None):
     """Read custom grammar, optionally call a normalizer, and restore our spans.
 
@@ -400,6 +506,11 @@ def normalize_with_exceptions(text, normalize=None):
     reading = lexical_reading(text)
     if reading is not None:
         return reading
+    if normalize is None and not SYMBOL_OR_CUSTOM.search(text):
+        return text
+    if text[0].isascii() and CODE_EXPRESSION.fullmatch(text.strip()):
+        return text
+    text = symbol_prose(text)
     if normalize is None:
         # All custom transformations require a Latin name/word or a numeral.
         # Pure Korean path descriptions need no protect/restore identity pass.

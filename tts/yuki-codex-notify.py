@@ -2,6 +2,7 @@
 """Queue only Codex's completed user-facing answer for resident TTS."""
 
 import fcntl
+import importlib.util
 import hashlib
 import json
 import os
@@ -17,6 +18,14 @@ from datetime import datetime
 
 
 ROOT = Path(__file__).resolve().parent
+# 작성자: 에닉(유키짱)
+# Load the existing custom module once; no upstream or model is initialized.
+_symbol_custom = None
+if (ROOT / 'yuki-text-normalization-overrides.py').is_file():
+    _symbol_spec = importlib.util.spec_from_file_location(
+        'notify_custom_symbols', ROOT / 'yuki-text-normalization-overrides.py')
+    _symbol_custom = importlib.util.module_from_spec(_symbol_spec)
+    _symbol_spec.loader.exec_module(_symbol_custom)
 STATE = Path(os.environ.get("CODEX_ENIKK_TTS_STATE", Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "codex_enikk" / "tts"))
 SEEN = STATE / "seen"
 JOBS = STATE / "jobs"
@@ -89,7 +98,9 @@ def advance_epoch(thread, turn, user, ordinal=None, state=None):
 
 
 def clean_text(text):
-    # Keep the answer's wording while omitting code and Markdown decoration.
+    # Keep source immutable; structural readings are a spoken representation.
+    if _symbol_custom is not None:
+        text = _symbol_custom.markdown_spoken(text)
     text = re.sub(r"```[\s\S]*?```", " ", text)
     text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", text)
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
@@ -213,3 +224,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# EOF
