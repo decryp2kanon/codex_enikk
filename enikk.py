@@ -23,10 +23,11 @@ import threading
 import termios
 from datetime import datetime, timezone
 from latest import Mirror
+from core_runtime import app_server
 from continuity import Continuity
 from persistence import DATABASES, snapshots, validate_database, validate_rollouts
 
-VERSION = '2.1.8'
+VERSION = '2.2.0'
 SUPPORTED_CODEX_VERSIONS = frozenset({'0.158.0', '0.160.0'})
 
 
@@ -627,148 +628,6 @@ def owned_processes():
                 signal.signal(sig, handler)
 
 
-def tts_status(mode, reason):
-    message = f"tts_mode={mode} reason={reason} monotonic_ns={time.monotonic_ns()}"
-    print(message, file=sys.stderr)
-    state = os.environ.get('CODEX_ENIKK_TTS_STATE')
-    if state:
-        with (Path(state) / 'runtime.log').open('a') as out:
-            out.write(message + '\n')
-
-
-@contextmanager
-def tts_run():
-    """A new queue/outbox namespace per wrapper, never recovered by another run."""
-    base = Path(os.environ.get('CODEX_ENIKK_TTS_BASE_STATE', os.environ.get('CODEX_ENIKK_TTS_STATE',
-                Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'codex_enikk/tts')))
-    runs = base / 'runs'
-    runs.mkdir(mode=0o700, parents=True, exist_ok=True)
-    state = Path(tempfile.mkdtemp(prefix='run-', dir=runs))
-    stale = 0
-    for old in runs.iterdir():
-        if old == state or not old.is_dir():
-            continue
-        stale += sum(p.is_file() and not p.name.startswith('.') for p in (old / 'jobs').glob('*'))
-        (old / 'cancelled').touch()
-        try:
-            worker = json.loads((old / 'worker.json').read_text())
-            pid = int(worker['pid'])
-            fields = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()
-            if fields[19] == worker['born'] and os.getpgid(pid) == pid:
-                os.killpg(pid, signal.SIGTERM)
-                deadline = time.monotonic() + 3
-                while Path(f'/proc/{pid}/stat').exists() and time.monotonic() < deadline:
-                    if Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()[0] == 'Z':
-                        break
-                    time.sleep(.02)
-        except (OSError, ValueError, KeyError):
-            pass
-    owner = f"{os.getpid()}:{Path('/proc/self/stat').read_text().rsplit(')', 1)[1].split()[19]}"
-    values = {'CODEX_ENIKK_TTS_BASE_STATE': str(base), 'CODEX_ENIKK_TTS_STATE': str(state), 'CODEX_ENIKK_TTS_RUN_ID': state.name,
-              'CODEX_ENIKK_TTS_OWNER': owner, 'CODEX_ENIKK_TTS_MODEL_LOCK': str(base / 'engine.lock')}
-    previous = {key: os.environ.get(key) for key in values}
-    os.environ.update(values)
-    (state / 'run.json').write_text(json.dumps({'run_id': state.name, 'owner': owner}))
-    with (state / 'runtime.log').open('a') as out:
-        out.write(f"run_id={state.name} stale_jobs_excluded={stale} previous_run_submitted=0\n")
-    try:
-        yield state
-    finally:
-        # Also observed by detached workers if the wrapper remains alive briefly.
-        (state / 'cancelled').touch()
-        for key, value in previous.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-
-
-@contextmanager
-def streaming_tts(session_id, python, script):
-    """A private server per wrapper; fail back before attaching the native TUI."""
-    server = helper = None
-    # Opt out explicitly; unsupported CLI versions retain the standalone path.
-    if os.environ.get('CODEX_ENIKK_STREAMING_TTS', '1') == '0' or not script.is_file():
-        tts_status('legacy_fallback', 'disabled' if os.environ.get('CODEX_ENIKK_STREAMING_TTS') == '0' else 'helper_missing')
-        yield None
-        return
-    try:
-        version = subprocess.run(['codex', '--version'], capture_output=True, text=True, timeout=5)
-        dependency = subprocess.run([str(python), '-c', 'import websocket'],
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
-        supported = version.returncode == 0 and supported_codex_version(version.stdout) and dependency.returncode == 0
-        unsupported_reason = ('unsupported_codex_version' if version.returncode != 0 or not supported_codex_version(version.stdout)
-                              else 'websocket_dependency_unavailable')
-    except (OSError, subprocess.SubprocessError) as exc:
-        supported = False
-        unsupported_reason = f'runtime_probe_{type(exc).__name__}'
-    if not supported:
-        tts_status('legacy_fallback', unsupported_reason)
-        yield None
-        return
-    with tempfile.TemporaryDirectory(prefix='codex-enikk-stream-') as directory:
-        root = Path(directory)
-        endpoint = root / 'server.sock'
-        ready = root / 'ready.json'
-        with (root / 'server.log').open('wb') as log:
-            try:
-                endpoint_ready = None
-                try:
-                    server = subprocess.Popen(['codex', '-c', 'approval_policy="never"', '-c', 'sandbox_mode="danger-full-access"', '-c', 'notify=[]',
-                                               'app-server', '--listen', 'unix://' + str(endpoint)],
-                                              stdin=subprocess.DEVNULL, stdout=log, stderr=log, close_fds=True, start_new_session=True)
-                    tts_status('starting', 'app_server_and_model_warmup')
-                    deadline = time.monotonic() + 30
-                    while not endpoint.exists() and server.poll() is None and time.monotonic() < deadline:
-                        time.sleep(.05)
-                    if endpoint.exists():
-                        helper = subprocess.Popen([str(python), str(script), '--socket', str(endpoint),
-                                                   '--thread', session_id, '--ready', str(ready)],
-                                                  stdin=subprocess.DEVNULL, stdout=log, stderr=log, close_fds=True, start_new_session=True)
-                        while not ready.exists() and helper.poll() is None and server.poll() is None and time.monotonic() < deadline:
-                            time.sleep(.05)
-                    if ready.exists() and server.poll() is None and helper is not None and helper.poll() is None:
-                        endpoint_ready = 'unix://' + str(endpoint)
-                except (OSError, subprocess.SubprocessError) as exc:
-                    print(f'Streaming TTS 시작 오류: {type(exc).__name__}', file=sys.stderr)
-                if endpoint_ready is None:
-                    reason = ('server_exit' if server is not None and server.poll() is not None else
-                              'helper_exit' if helper is not None and helper.poll() is not None else
-                              'startup_spawn_failed' if server is None else 'readiness_timeout')
-                    tts_status('legacy_fallback', reason)
-                    # Stop the candidate observer before starting the legacy watcher.
-                    for process in (helper, server):
-                        if process is not None and process.poll() is None:
-                            process.terminate()
-                            try:
-                                process.wait(timeout=3)
-                            except subprocess.TimeoutExpired:
-                                process.kill()
-                                process.wait()
-                    print('Streaming TTS 준비 실패: 기존 Codex 실행 경로를 사용합니다.', file=sys.stderr)
-                # Keep exceptions from the native TUI body out of startup fallback.
-                if endpoint_ready:
-                    tts_status('streaming', 'ready')
-                    print(f"Yuki TTS readiness log: {os.environ['CODEX_ENIKK_TTS_STATE']}/runtime.log (tail -f in another terminal)", file=sys.stderr)
-                yield endpoint_ready
-            finally:
-                # Cancel audio before waiting for helper shutdown/snapshot work.
-                state = os.environ.get('CODEX_ENIKK_TTS_STATE')
-                if state and os.environ.get('CODEX_ENIKK_TTS_OWNER'):
-                    try:
-                        (Path(state) / 'cancelled').touch()
-                    except OSError:
-                        pass
-                for process in (helper, server):
-                    if process is not None and process.poll() is None:
-                        process.terminate()
-                        try:
-                            process.wait(timeout=3)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            process.wait()
-
-
 @contextmanager
 def submission_proxy(endpoint, session_id, python):
     """Wrapper owns both submission paths; never spawn another Codex/TTS worker."""
@@ -779,7 +638,7 @@ def submission_proxy(endpoint, session_id, python):
     if version.returncode or version.stdout.strip() != 'codex-cli 0.160.0':
         raise RuntimeError('Submission arbiter requires verified Codex 0.160.0')
     script = Path(__file__).resolve().parent / 'trigger_service.py'
-    root = Path.home() / '.local/state/codex_enikk/trigger'
+    root = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'codex_enikk/trigger'
     private_dir(root)
     with tempfile.TemporaryDirectory(prefix='enikk-arbiter-') as directory:
         proxy, ready = Path(directory) / 'native.sock', Path(directory) / 'ready.json'
@@ -879,32 +738,17 @@ def conversation(session_id, instance_fd, args=()):
     command = ['codex', 'resume', session_id, yolo, '--no-daemon', '-c', 'notify=[]', *options]
     # Inherit stdin/stdout/stderr and the foreground terminal. Do not pipe or
     # parse TUI output: doing so breaks image paste, raw input and rendering.
-    with terminal_restore() as restore_terminal, owned_processes(), tts_run(), Mirror(
+    core_state = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'codex_enikk/core'
+    private_dir(core_state)
+    if tts_debug:
+        print('음성 상태와 로그: enikk_tts status / journalctl --user -u enikk-tts', file=sys.stderr)
+    # Core owns the server, mirror and trigger even when TTS is not installed.
+    with terminal_restore() as restore_terminal, owned_processes(), Mirror(
             codex_home() / 'thread_history_1.sqlite', session_id,
-            Path.home() / 'codex-latest.txt',
-            Path(os.environ['CODEX_ENIKK_TTS_STATE']) / 'mirror-thread.json'):
-        if tts_debug:
-            open_tts_debug_window(os.environ['CODEX_ENIKK_TTS_STATE'])
-        install_root = Path(__file__).resolve().parent
-        tts_script = install_root / 'tts' / 'yuki-codex-rollout-watch.py'
-        chatterbox_python = Path(os.environ.get('CODEX_ENIKK_CHATTERBOX_HOME',
-                                                Path.home() / 'Apps/chatterbox-yuki')) / '.venv/bin/python'
-        tts_python = sys.executable
-        tts_ready = (os.environ.get('CODEX_ENIKK_TTS', '1') != '0' and tts_script.is_file()
-                     and chatterbox_python.is_file() and shutil.which('paplay'))
-        stream_script = install_root / 'tts' / 'yuki-codex-stream.py'
-        from contextlib import nullcontext
-        context = streaming_tts(session_id, chatterbox_python, stream_script) if tts_ready else nullcontext(None)
-        with context as upstream, submission_proxy(upstream, session_id, chatterbox_python) as endpoint:
+            Path.home() / 'codex-latest.txt', core_state / 'mirror-thread.json'):
+        with app_server() as upstream, submission_proxy(upstream, session_id, sys.executable) as endpoint:
             if endpoint:
-                # Remote resume rejects permission flags; the private server owns
-                # the same unrestricted policy as the existing standalone path.
                 command = ['codex', 'resume', session_id, '--remote', endpoint, *options]
-            elif tts_ready:
-                subprocess.Popen([tts_python, str(tts_script)], stdin=subprocess.DEVNULL,
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                 close_fds=True)
-            # The stream helper is the sole TTS owner in remote mode; no JSONL watcher.
             child = subprocess.Popen(command, close_fds=True)
             try:
                 while True:

@@ -171,96 +171,16 @@ UTF-8 기준 200,000바이트는 목표 크기입니다. 오래된 메시지를 
 자르지 않고 온전히 보존합니다. 요약이나 LLM 호출, Dorothy API 호출은 없습니다.
 필요할 때 이 TXT를 사용자가 직접 Dorothy에게 업로드합니다.
 
-## 선택적 로컬 TTS
+## 독립 로컬 TTS
 
-`codex_enikk`는 설치된 TTS 의존성을 찾으면 CODEX 진행 메시지와 최종 메시지를 확정된
-유키짱 음성으로 읽습니다. 사용자 입력, reasoning, 도구 출력과 로그는 읽지 않습니다.
-Chatterbox 모델과 SUPER-CLEAN C2 conditioning은 worker 시작 시 한 번 준비하고 재사용합니다.
-음성 설정과 설치 요구사항은 [`tts/README.md`](tts/README.md)에 있습니다.
+본체 실행은 `codex_enikk`, 음성 제어는 `enikk_tts start|stop|restart|status`다.
+본체 설치·업데이트는 TTS를 설치하거나 재시작하지 않는다.
+음성 설치는 `PREFIX="$HOME/.local" ./install-tts.sh`, 업데이트는
+`enikk_tts update /path/to/source` 다음 `enikk_tts restart`로 진행한다.
+현재 venv·모델·reference는 유지한다. 본체는 시스템 Python의 `python3-websocket`을 사용한다.
 
-TTS 의존성이 없거나 TTS가 실패해도 Codex TUI, 세션 연속성, 백업과 transcript는 계속
-동작합니다. Chatterbox 모델, WAV, 세션 파일과 인증 정보는 저장소나 관리 설치에 포함하지 않습니다.
-
-신규 Ubuntu 설치는 `python3-venv`, `alsa-utils`, `libsndfile1`과 전용 venv를 준비하고
-`chatterbox-tts==0.1.7`을 설치합니다. CUDA가 있으면 GPU를, 없으면 CPU를 사용합니다.
-`CODEX_ENIKK_TTS=0`은 실행 시 TTS를 끄고,
-`CODEX_ENIKK_INSTALL_TTS=0`은 설치·업데이트 중 선택 구성 준비를 건너뜁니다. 제거 시
-관리 설치 파일만 제거하며 사용자 venv, reference와 모델 cache는 보존합니다.
-
-### TTS 사용법
-
-Ubuntu 22.04 이상에서 일반적인 전역 설치는 다음과 같습니다. 설치 프로그램이 필요한
-Ubuntu 패키지와 전용 Python 환경을 준비합니다.
-
-```bash
-git clone https://github.com/decryp2kanon/codex_enikk.git
-cd codex_enikk
-sudo ./install.sh
-cd /path/to/existing-project
-codex_enikk
-```
-
-별도 TTS 명령을 실행할 필요는 없습니다. `codex_enikk`를 실행하면 TTS worker가 함께
-시작되고, 화면에 완성되어 표시된 CODEX 진행 메시지와 최종 답변을 순서대로 읽습니다.
-Chatterbox 모델은 최초 실행 때 정상 사용자 cache로 자동 다운로드되고 persistent worker가
-한 번 로드한 뒤 재사용합니다. bundled `yuki_super-clean.wav`도 자동 설치되고 실제로 열어
-검증합니다. 기존 reference와 venv는 업데이트 때 덮어쓰거나 삭제하지 않습니다.
-다른 승인된 reference를 명시적으로 설치하려면
-`CODEX_ENIKK_CHATTERBOX_REFERENCE_SOURCE=/path/reference.wav`를 설치 명령에 지정합니다.
-
-읽기 텍스트는 Yuki custom 정규화만 사용합니다. 별도 외부 정규화 백엔드나 선택형 사전 프로세스는 없습니다.
-검증된 프로젝트명·기술어·숫자·단위·경로 예외만 좁게 적용하며 화면 원문은 변경하지 않습니다. 각 chunk는 완성되는 즉시 재생
-queue에 들어가므로 뒤쪽 문장 전체의 합성을 기다리지 않습니다.
-
-단일 줄바꿈은 같은 대화 흐름으로 이어 읽고, 빈 줄은 짧은 문단 호흡으로 처리합니다.
-모델이 만든 앞뒤 silence도 정리하여 chunk 경계에서 긴 공백이 누적되지 않게 합니다.
-화면 텍스트는 바꾸지 않으며 이 처리는 음성 합성 내부에만 적용됩니다.
-
-관리자 권한 없이 사용자 경로에 설치하려면 OS 패키지만 먼저 준비합니다.
-
-```bash
-sudo apt-get update
-sudo apt-get install alsa-utils
-PREFIX="$HOME/.local" ./install.sh
-export PATH="$HOME/.local/bin:$PATH"
-codex_enikk
-```
-
-한 번만 음성을 끄거나, TTS 구성 없이 설치·업데이트하려면 다음 환경변수를 사용합니다.
-
-```bash
-CODEX_ENIKK_TTS=0 codex_enikk
-sudo env CODEX_ENIKK_INSTALL_TTS=0 ./install.sh
-sudo env CODEX_ENIKK_INSTALL_TTS=0 bash ./update.sh
-```
-
-설치 후 TTS 구성만 다시 준비하려면 설치 경로의 setup script를 실행합니다.
-
-```bash
-# 기본 전역 설치
-sudo /usr/local/lib/codex_enikk/tts/setup-tts.sh
-
-# 사용자 PREFIX 설치
-"$HOME/.local/lib/codex_enikk/tts/setup-tts.sh"
-```
-
-업데이트는 새로 받은 source 폴더에서 실행하고, 실행 중인 `codex_enikk`를 종료한 뒤 다시
-시작합니다.
-
-```bash
-git pull --ff-only
-sudo bash ./update.sh
-codex_enikk
-```
-
-문제가 있으면 다음 항목으로 설치 상태를 확인할 수 있습니다. TTS가 실패해도 Codex의
-세션 연속성, 백업, transcript와 TUI는 계속 동작합니다.
-
-```bash
-$HOME/Apps/chatterbox-yuki/.venv/bin/python -c 'import chatterbox, torch; print(torch.cuda.is_available())'
-command -v paplay
-tail -n 50 "$HOME/.local/state/codex_enikk/tts/notify.log"
-```
+상태·준비 경계·설치 경로·rollback·최초 전환은 [분리 운영 문서](docs/tts-separation.md)를 따른다.
+최초 본체 전환은 별도 승인이 필요하며, 이후 TTS 작업은 본체 재시작을 포함하지 않는다.
 
 ## 제거 및 테스트
 
@@ -284,27 +204,11 @@ bash -n install.sh uninstall.sh codex_enikk codex_session_save.sh codex_enikk_re
 실제 로그인·서버 응답 및 데스크톱 클립보드는 자동 테스트 범위에 포함되지 않습니다.
 샌드박스에서 추상 소켓 bind가 금지되면 관련 테스트 3개는 사유를 표시하고 건너뜁니다.
 
-### 문장 단위 streaming TTS
-
-Codex 0.158.0에서는 app-server streaming이 기본입니다. wrapper가 native TUI,
-private server, helper를 관리합니다. `CODEX_ENIKK_STREAMING_TTS=0`, 미지원
-Codex 버전 또는 초기화 실패 시 기존 `--no-daemon`과 완료 메시지 TTS를 사용합니다.
-명확한 한국어 문장 종료는 다음 delta나 final을 기다리지 않고 독립 job으로
-즉시 전달합니다. 소수·도메인·경로처럼 불확실한 점은 lookahead 보호를 유지합니다.
-시작 시 모델 준비를 확인한 뒤 TUI를 열며, streaming 또는 fallback 상태와 이유를
-표시합니다. 실행마다 TTS queue를 분리하므로 종료·재시작 후 이전 대사는 자동 재생하지 않습니다.
-내부 long-tail 이중 실패에는 제한된 절 분할 복구를 적용합니다. 파일 경로는
-화면 원문을 보존하고 TTS에서만 파일명·확장자 중심 한국어 설명으로 변환합니다.
-내부 anomaly는 재생 전에 차단하며, 제한된 복구 후 정상 재생되면 성공으로
-계산합니다. 최종 실패·누락·중복·순서 오류는 성공으로 계산하지 않습니다.
-실패 내용은 보존되며, 자동 무한 재시도는 하지 않습니다. 상세 정책은
-[tts/README.md](tts/README.md)를 참고하세요.
-
 ## 최근 대화 복사
 
 실행 중인 에닉 대화는 `~/codex-latest.txt`에 `[USER]` / `[ENIKK]` 일반 텍스트로 자동 갱신됩니다. 최대 200,000바이트이며 오래된 메시지부터 제거합니다. 단일 메시지가 제한보다 크면 UTF-8 경계를 지켜 최신 부분만 남깁니다. 영구 백업이 아닌 현재 대화의 편의용 미러입니다. `gedit ~/codex-latest.txt`에서 열고 새로 불러와 복사할 수 있습니다.
 
-대화 DB는 별도 백그라운드 작업에서 읽기 전용으로 확인하며 보통 1초 이내에 반영합니다. 현재 스레드를 재개하면 이전 텍스트도 복원되지만 이전 실행의 TTS는 재생하지 않습니다. Streaming 모드의 새 스레드 생성/첫 입력도 자동 추적합니다. TTS 비활성화 또는 legacy 모드에서는 wrapper가 시작한 스레드를 표시합니다. 원본 Codex 기록과 기존 백업 파일은 변경하지 않습니다.
+대화 DB는 별도 백그라운드 작업에서 읽기 전용으로 확인하며 보통 1초 이내에 반영합니다. 현재 스레드를 재개하면 이전 텍스트도 복원되지만 이전 실행의 TTS는 재생하지 않습니다. 본체가 선택한 스레드를 음성 서비스와 무관하게 표시합니다. 원본 Codex 기록과 기존 백업 파일은 변경하지 않습니다.
 
 ## Codex 업데이트 전 호환성 검사
 

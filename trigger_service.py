@@ -14,6 +14,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
+from voice_events import Publisher as VoicePublisher
 from submission_arbiter import Arbiter, Busy, UnknownEffect
 from trigger_transport import accept_websocket, connect, peer_uid, rpc_object
 
@@ -73,20 +74,9 @@ def satoshi_marker(part):
 
 
 def schedule_satoshi_postprocess(task, part):
-    script = Path(__file__).resolve().parent / 'satoshi_training_supervisor.py'
-    if not script.is_file():
-        raise OSError('missing satoshi training supervisor')
-    unit = f'codex-enikk-satoshi-part{part:02d}-{task.name[:8]}'
-    environment = os.environ.copy()
-    environment.setdefault('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
-    environment.setdefault('DBUS_SESSION_BUS_ADDRESS', f'unix:path=/run/user/{os.getuid()}/bus')
-    subprocess.run([
-        'systemd-run', '--user', '--collect', '--unit', unit,
-        '--property=Restart=on-failure', '--property=RestartSec=5s',
-        '/usr/bin/python3', str(script), '--part', str(part), '--task-id', task.name,
-        '--wrapper-pid', str(os.getppid()),
-    ], env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-       timeout=10, check=True)
+    # Education resumes only through the separately authorized TTS-only workflow.
+    atomic(task / 'tts-postprocess-paused.json', {'part': part,
+        'status': 'PAUSED', 'reason': 'TTS separation; education requires explicit resumption'})
 
 
 def atomic(path, value):
@@ -161,6 +151,7 @@ class Service:
         self.bound = []
         self.queue_wakeup = threading.Event()
         self.dispatcher = None
+        self.voice = VoicePublisher(thread_id)
 
     def _validate_task_record(self, record):
         state = json.loads(record.read_text())
@@ -282,6 +273,12 @@ class Service:
         return True
 
     def received(self, session, event):
+        if session is self.observer and event.get('method'):
+            # A failed voice send never changes the submission arbiter.
+            try:
+                self.voice.emit(event)
+            except Exception:
+                pass  # Voice projection is never a core transport failure.
         with self.guard:
             result = event.get('result')
             result = result if isinstance(result, dict) else {}
@@ -638,6 +635,9 @@ def main():
     signal.signal(signal.SIGTERM, stop); signal.signal(signal.SIGINT, stop)
     try:
         service.initialize()
+        core = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'codex_enikk/core'
+        private_directory(core)
+        atomic(core / 'mirror-thread.json', {'thread': args.thread})
         for path, handler in ((Path(args.proxy), native_client), (Path(args.trigger), trigger_client)):
             listener = bind_local(path); service.listeners.append(listener); service.bound.append(path)
             def accept_loop(listener=listener, handler=handler):
@@ -649,10 +649,14 @@ def main():
             threading.Thread(target=accept_loop, daemon=True).start()
         service.start_dispatcher()
         atomic(Path(args.ready), {'thread': args.thread, 'pid': os.getpid(), 'status': service.arbiter.state})
-        while not service.stopped.wait(.25): pass
+        while not service.stopped.wait(.25):
+            if service.observer and service.observer.alive:
+                service.voice.emit()
+
     finally:
         service.stopped.set()
         service.queue_wakeup.set()
+        service.voice.close()
         for listener in service.listeners: listener.close()
         for session in list(service.sessions): session.close()
         for path in service.bound: path.unlink(missing_ok=True)

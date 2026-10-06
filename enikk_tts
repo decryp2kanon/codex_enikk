@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""Stable launcher; all changeable voice control code belongs to the selected release."""
+import os
+from pathlib import Path
+import sys
+
+def main():
+    root = Path(__file__).resolve().parent
+    if (root / 'active').is_symlink():
+        os.environ.setdefault('ENIKK_TTS_INSTALL', str(root))
+        root = (root / 'active').resolve()
+    sys.path.insert(0, str(root))
+    from tts_control import main as control
+    return control()
+
+if __name__ == '__main__':
+    sys.exit(main())

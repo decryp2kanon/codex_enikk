@@ -154,26 +154,8 @@ def git(*args):
     return subprocess.check_output(['git','-C',str(SOURCE),*args],text=True).strip()
 
 def restart(old_pid):
-    env=proc_env(old_pid) if old_pid and alive(old_pid) else {}
-    if old_pid and alive(old_pid):
-        os.kill(old_pid,signal.SIGTERM); end=time.monotonic()+20
-        while alive(old_pid) and time.monotonic() < end: time.sleep(.1)
-        if alive(old_pid): raise RuntimeError('old wrapper did not terminate')
-    start_ns=time.time_ns(); launch=os.environ.copy()
-    for k in ('DISPLAY','XAUTHORITY','DBUS_SESSION_BUS_ADDRESS','XDG_RUNTIME_DIR','HOME','PATH'):
-        if env.get(k): launch[k]=env[k]
-    launch.setdefault('DISPLAY',':1')
-    launch.setdefault('XAUTHORITY',f'/run/user/{os.getuid()}/gdm/Xauthority')
-    launch.setdefault('DBUS_SESSION_BUS_ADDRESS',f'unix:path=/run/user/{os.getuid()}/bus')
-    launch.setdefault('XDG_RUNTIME_DIR',f'/run/user/{os.getuid()}')
-    cmd='cd "$HOME"; exec "$HOME/.local/bin/codex_enikk" --tts-debug'
-    subprocess.run(['gnome-terminal','--window','--title=Enikk','--','bash','-lc',cmd],env=launch,check=True)
-    end=time.monotonic()+30
-    while time.monotonic() < end:
-        found=wrappers({old_pid})
-        if found: return max(found)[0],start_ns
-        time.sleep(.25)
-    raise RuntimeError('new wrapper missing')
+    raise RuntimeError('Legacy automatic training is paused. Use the separately approved TTS-only education workflow; core restart is forbidden.')
+
 
 def verify_parity():
     rel=Path('tts/yuki-text-normalization-overrides.py')

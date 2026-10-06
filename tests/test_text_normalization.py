@@ -230,7 +230,7 @@ class CustomOnlyArchitectureTests(unittest.TestCase):
         self.assertNotIn('KNOWN_UNITS =', wrapper)
 
     def test_install_and_update_preserve_only_custom_normalization(self):
-        for name in ['install.sh', 'update.sh']:
+        for name in ['tts_release.py']:
             script = (SOURCE.parents[1] / name).read_text()
             self.assertIn('yuki-text-normalization.py', script)
             self.assertIn('yuki-text-normalization-overrides.py', script)

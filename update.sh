@@ -20,7 +20,7 @@ python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); compile(p.read_text
 for file in enikk.py VERSION README.md; do
     [[ -f "$source_dir/$file" && -f "$lib/$file" && ! -L "$lib/$file" ]] || exit 1
 done
-[[ -d "$source_dir/tts" ]] || exit 1
+python3 -c 'import websocket'
 checker="${stage}${prefix}/bin/check-codex-compat"
 trigger="${stage}${prefix}/bin/enikk-trigger"
 if [[ -e "$trigger" || -L "$trigger" ]]; then
@@ -39,9 +39,6 @@ previous="$(mktemp -d "$lib/previous-XXXXXXXX")"
 for file in enikk.py VERSION README.md; do
     cp -a -- "$lib/$file" "$previous/$file"
 done
-if [[ -d "$lib/tts" ]]; then
-    cp -a -- "$lib/tts" "$previous/tts"
-fi
 temporary=""
 cleanup() {
     [[ -z "$temporary" ]] || rm -f -- "$temporary"
@@ -50,12 +47,12 @@ trap cleanup EXIT
 if [[ -f "$lib/latest.py" ]]; then
     cp -a -- "$lib/latest.py" "$previous/latest.py"
 fi
-for file in persistence.py continuity.py restore.py check_codex_compat.py check-codex-compat uninstall.sh handoff_command.py submission_arbiter.py trigger_transport.py trigger_service.py trigger_client.py satoshi_training_supervisor.py enikk-trigger; do
+for file in core_runtime.py voice_events.py persistence.py continuity.py restore.py check_codex_compat.py check-codex-compat uninstall.sh handoff_command.py submission_arbiter.py trigger_transport.py trigger_service.py trigger_client.py satoshi_training_supervisor.py enikk-trigger; do
     if [[ -f "$lib/$file" ]]; then
         cp -a -- "$lib/$file" "$previous/$file"
     fi
 done
-for file in README.md VERSION latest.py persistence.py continuity.py restore.py enikk.py check_codex_compat.py check-codex-compat uninstall.sh handoff_command.py submission_arbiter.py trigger_transport.py trigger_service.py trigger_client.py satoshi_training_supervisor.py enikk-trigger; do
+for file in core_runtime.py voice_events.py README.md VERSION latest.py persistence.py continuity.py restore.py enikk.py check_codex_compat.py check-codex-compat uninstall.sh handoff_command.py submission_arbiter.py trigger_transport.py trigger_service.py trigger_client.py satoshi_training_supervisor.py enikk-trigger; do
     temporary="$(mktemp "$lib/.$file.XXXXXXXX")"
     install -m 644 -- "$source_dir/$file" "$temporary"
     mv -f -- "$temporary" "$lib/$file"
@@ -67,20 +64,6 @@ if [[ ! -L "$trigger" ]]; then
 fi
 if [[ ! -L "$checker" ]]; then
     ln -s -- ../lib/codex_enikk/check-codex-compat "$checker"
-fi
-tts_temporary="$(mktemp -d "$lib/.tts.XXXXXXXX")"
-for file in README.md DEFERRED-ISSUES.md setup-tts.sh yuki-text-normalization.py yuki-text-normalization-overrides.py yuki-chatterbox-engine.py yuki-codex-notify.py yuki-codex-rollout-watch.py yuki-codex-stream.py; do
-    install -m 644 -- "$source_dir/tts/$file" "$tts_temporary/$file"
-done
-mkdir -- "$tts_temporary/assets"
-install -m 644 -- "$source_dir/tts/assets/yuki_super-clean.wav" "$tts_temporary/assets/yuki_super-clean.wav"
-chmod 755 "$tts_temporary/setup-tts.sh"
-rm -rf -- "$lib/tts"
-mv -- "$tts_temporary" "$lib/tts"
-if [[ -z "$stage" && "${CODEX_ENIKK_INSTALL_TTS:-1}" != 0 ]]; then
-    if ! "$lib/tts/setup-tts.sh"; then
-        printf '%s\n' '경고: 선택적 TTS 업데이트에 실패했습니다. Codex 기본 기능은 정상적으로 사용할 수 있습니다.' >&2
-    fi
 fi
 printf '이전 버전 보존: %s\n' "$previous"
 "${stage}${prefix}/bin/codex_enikk" --version

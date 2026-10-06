@@ -13,6 +13,7 @@ import tarfile
 import tempfile
 import unittest
 from unittest.mock import call, patch
+from contextlib import nullcontext
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -69,6 +70,9 @@ class EnikkTests(unittest.TestCase):
             # The real source keeps the production singleton; flock is still tested.
             source = source.replace('guard.bind(INSTANCE_SOCKET_PREFIX + str(os.getuid()))', 'pass')
         (self.app_root / 'enikk.py').write_text(source)
+        (self.app_root / 'core_runtime.py').write_text('from contextlib import nullcontext\ndef app_server(): return nullcontext(None)\n')
+        core_patch = patch.object(enikk, 'app_server', side_effect=lambda: nullcontext(None))
+        core_patch.start(); self.addCleanup(core_patch.stop)
         shutil.copy2(ROOT / 'latest.py', self.app_root / 'latest.py')
         shutil.copy2(ROOT / 'persistence.py', self.app_root / 'persistence.py')
         shutil.copy2(ROOT / 'continuity.py', self.app_root / 'continuity.py')
@@ -323,13 +327,9 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
         with patch.dict(os.environ, {'CODEX_ENIKK_STREAMING_TTS': '0'}), patch('enikk.shutil.which', return_value='/usr/bin/aplay'), patch('enikk.subprocess.Popen') as launch:
             launch.return_value.wait.return_value = 0
             self.assertEqual(enikk.conversation('example-session', 42, ['-i', 'picture.png']), 0)
-            launch.assert_has_calls([
-                call([sys.executable, str(ROOT / 'tts/yuki-codex-rollout-watch.py')],
-                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, close_fds=True),
-                call(['codex', 'resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox',
-                      '--no-daemon', '-c', 'notify=[]', '-i', 'picture.png'], close_fds=True),
-            ])
+            launch.assert_called_once_with(
+                ['codex', 'resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox',
+                 '--no-daemon', '-c', 'notify=[]', '-i', 'picture.png'], close_fds=True)
 
     def test_pty_is_passed_to_native_codex(self):
         self.run_cli(prompt='')
@@ -356,84 +356,10 @@ print('native terminal')
             os.close(master)
             os.close(slave)
 
-    def test_stream_startup_failure_falls_back_without_raising(self):
-        script = self.base / 'stream.py'; script.touch()
-        result = subprocess.CompletedProcess([], 0, 'codex-cli 0.158.0\n', '')
-        with patch.dict(os.environ, {'CODEX_ENIKK_STREAMING_TTS':'1'}), patch('enikk.subprocess.run', return_value=result), patch('enikk.subprocess.Popen', side_effect=OSError('spawn failed')):
-            with enikk.streaming_tts('session', Path('/python'), script) as endpoint:
-                self.assertIsNone(endpoint)
-
-    def test_new_run_never_reuses_pending_outbox_or_receipts(self):
-        base = self.base / 'tts'
-        with patch.dict(os.environ, {'CODEX_ENIKK_TTS_STATE': str(base)}):
-            with enikk.tts_run() as first:
-                (first / 'jobs').mkdir()
-                for number in range(10):
-                    (first / 'jobs' / str(number)).write_text('old pending')
-                (first / 'jobs/.played-old').write_text('receipt')
-                (first / 'streams').mkdir()
-                (first / 'streams/old.json').write_text('outbox')
-            self.assertTrue((first / 'cancelled').exists())
-            # Simulate a crash leaving the marker unwritten; startup still excludes it.
-            (first / 'cancelled').unlink()
-            with enikk.tts_run() as second:
-                self.assertNotEqual(first, second)
-                self.assertFalse((second / 'jobs').exists())
-                self.assertTrue((first / 'cancelled').exists())
-                self.assertIn('stale_jobs_excluded=10', (second / 'runtime.log').read_text())
-                self.assertEqual(os.environ['CODEX_ENIKK_TTS_MODEL_LOCK'], str(base / 'engine.lock'))
-            self.assertEqual(os.environ['CODEX_ENIKK_TTS_STATE'], str(base))
-
-    def test_disabled_streaming_reports_reason(self):
-        import io
-        from contextlib import redirect_stderr
-        capture = io.StringIO()
-        with patch.dict(os.environ, {'CODEX_ENIKK_STREAMING_TTS':'0'}), redirect_stderr(capture):
-            with enikk.streaming_tts('session', Path('/python'), Path('/missing')) as endpoint:
-                self.assertIsNone(endpoint)
-        self.assertIn('tts_mode=legacy_fallback reason=disabled', capture.getvalue())
-
-    def test_inherited_run_environment_keeps_global_model_lock(self):
-        base = self.base / 'tts'
-        with patch.dict(os.environ, {'CODEX_ENIKK_TTS_BASE_STATE': str(base),
-                                     'CODEX_ENIKK_TTS_STATE': str(base / 'runs/old')}):
-            with enikk.tts_run() as new:
-                self.assertEqual(new.parent, base / 'runs')
-                self.assertEqual(os.environ['CODEX_ENIKK_TTS_MODEL_LOCK'], str(base / 'engine.lock'))
-
-    def test_stream_lifecycle_and_body_exception_cleanup(self):
-        script = self.base / 'stream.py'; script.touch()
-        state = self.base / 'stream-state'; state.mkdir()
-        result = subprocess.CompletedProcess([], 0, 'codex-cli 0.158.0\n', '')
-        children = []
-        def launch(args, **kwargs):
-            from unittest.mock import Mock
-            child = Mock(); child.poll.return_value = None
-            def terminate():
-                self.assertTrue((state / 'cancelled').exists())
-                child.poll.return_value = 0
-            child.terminate.side_effect = terminate
-            children.append(child)
-            self.assertTrue(kwargs['start_new_session'])
-            if '--listen' in args:
-                self.assertIn('notify=[]', args)
-                self.assertIn('approval_policy="never"', args)
-                Path(args[-1].removeprefix('unix://')).touch()
-            else:
-                Path(args[args.index('--ready')+1]).write_text('{}')
-            return child
-        with patch.dict(os.environ, {'CODEX_ENIKK_TTS_STATE':str(state), 'CODEX_ENIKK_TTS_OWNER':'test'}), patch('enikk.subprocess.run', return_value=result), patch('enikk.subprocess.Popen', side_effect=launch):
-            os.environ.pop('CODEX_ENIKK_STREAMING_TTS', None)
-            with self.assertRaisesRegex(RuntimeError, 'native body'):
-                with enikk.streaming_tts('session', Path('/python'), script) as endpoint:
-                    self.assertTrue(endpoint.startswith('unix://'))
-                    directory = Path(endpoint.removeprefix('unix://')).parent
-                    raise RuntimeError('native body')
-        self.assertFalse(directory.exists())
-        self.assertEqual(len(children), 2)
-        for child in children:
-            child.terminate.assert_called_once()
-            child.wait.assert_called_once()
+    # Voice lifecycle tests moved to test_independent_tts; core must never own it.
+    def test_core_has_no_voice_lifecycle(self):
+        self.assertFalse(hasattr(enikk, 'tts_run'))
+        self.assertFalse(hasattr(enikk, 'streaming_tts'))
 
     def test_ctrl_c_is_left_to_native_child(self):
         with patch('enikk.subprocess.Popen') as launch:
@@ -727,8 +653,8 @@ while True: time.sleep(1)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 compat_help = subprocess.run([str(prefix / 'bin/check-codex-compat'), '--help'], env=env, capture_output=True, text=True)
                 self.assertEqual(compat_help.returncode, 0, compat_help.stderr)
-                self.assertEqual((prefix / 'lib/codex_enikk/tts/yuki-codex-stream.py').read_bytes(), (ROOT / 'tts/yuki-codex-stream.py').read_bytes())
-                self.assertEqual((prefix / 'lib/codex_enikk/tts/yuki-chatterbox-engine.py').read_bytes(), (ROOT / 'tts/yuki-chatterbox-engine.py').read_bytes())
+                self.assertFalse((prefix / 'lib/codex_enikk/tts').exists())
+                self.assertEqual((prefix / 'lib/codex_enikk/core_runtime.py').read_bytes(), (ROOT / 'core_runtime.py').read_bytes())
                 for name in ('codex_enikk', 'codex_session_save.sh'):
                     result = subprocess.run([str(prefix / 'bin' / name), '--version'], env=env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
@@ -757,6 +683,8 @@ while True: time.sleep(1)
         lib = prefix / 'lib/codex_enikk'
         (lib / 'enikk.py').write_text('print("old version")\n')
         (lib / 'VERSION').write_text('2.0.2\n')
+        voice = prefix / 'lib/enikk_tts/releases/sentinel'
+        voice.mkdir(parents=True); (voice / 'engine.py').write_text('voice unchanged')
         session = self.write_session()
         original = session.read_bytes()
         result = subprocess.run(['bash', str(ROOT / 'update.sh')], env=env, capture_output=True, text=True)
@@ -767,6 +695,7 @@ while True: time.sleep(1)
         self.assertEqual((previous[0] / 'enikk.py').read_text(), 'print("old version")\n')
         self.assertEqual((lib / 'enikk.py').read_bytes(), (ROOT / 'enikk.py').read_bytes())
         self.assertEqual(session.read_bytes(), original)
+        self.assertEqual((voice / 'engine.py').read_text(), 'voice unchanged')
         for name in ('handoff_command.py', 'submission_arbiter.py', 'trigger_transport.py',
                      'trigger_service.py', 'trigger_client.py', 'enikk-trigger'):
             self.assertEqual((lib / name).read_bytes(), (ROOT / name).read_bytes())
@@ -774,13 +703,7 @@ while True: time.sleep(1)
         trigger_help = subprocess.run([str(prefix / 'bin/enikk-trigger'), '--help'], env=env,
                                       capture_output=True, text=True)
         self.assertEqual(trigger_help.returncode, 0, trigger_help.stderr)
-        self.assertEqual((lib / 'tts/yuki-codex-stream.py').read_bytes(), (ROOT / 'tts/yuki-codex-stream.py').read_bytes())
-        audio = (lib / 'tts/yuki-chatterbox-engine.py').read_text()
-        self.assertEqual(audio, (ROOT / 'tts/yuki-chatterbox-engine.py').read_text())
-        self.assertIn("['/usr/bin/paplay', speed_path]", audio)
-        self.assertIn('atempo=1.25', audio)
-        self.assertNotIn('/usr/bin/aplay', audio)
-        self.assertEqual((lib / 'tts/assets/yuki_super-clean.wav').read_bytes(), (ROOT / 'tts/assets/yuki_super-clean.wav').read_bytes())
+        self.assertFalse((lib / 'tts').exists())
         (lib / '.installed-by-codex-enikk').write_text('unmanaged')
         result = subprocess.run(['bash', str(ROOT / 'update.sh')], env=env, capture_output=True)
         self.assertNotEqual(result.returncode, 0)

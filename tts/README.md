@@ -1,114 +1,53 @@
-# Chatterbox TTS
+# Chatterbox TTS — independent service
 
-`codex_enikk` reads completed CODEX progress and final messages with a persistent
-Chatterbox worker. User input, reasoning, tool output, code blocks, and raw logs are excluded.
 
-The external runtime defaults to `~/Apps/chatterbox-yuki` and requires:
+The core owns Codex TUI/app-server, trigger, mirror and continuity checks.
+Voice synthesis runs under an independent systemd user service. Neither component
+starts, stops or updates the other. Core requires system Python 3.10+ and
+`python3-websocket`; it does not use the Chatterbox virtual environment.
 
-- `.venv/bin/python` with `chatterbox-tts==0.1.7`
-- `yuki_super-clean.wav`
-- PulseAudio `paplay` (`pulseaudio-utils`), using the existing default sink
+## Install and control
 
-The fixed voice is SUPER-CLEAN C2: Korean, exaggeration `0.50`, and CFG weight `0.70`.
-Failures reset conditioning and retry once. After two failed generation attempts, the chunk
-is recorded as FAILED_EXPLICITLY with its text and reason; other chunks continue.
-`setup-tts.sh` creates the venv and installs dependencies. CUDA is selected when available;
-otherwise the worker uses CPU. Model files are downloaded by Chatterbox on first use and kept
-in its normal user cache.
-
-The bundled SUPER-CLEAN reference is installed automatically. To explicitly replace it with
-another authorized reference, use the advanced override:
+From the source repository, run `PREFIX="$HOME/.local" ./install-tts.sh`.
+This installs only voice code and registers a stopped user service. It does not
+download models, alter the existing venv/reference, or start Codex.
 
 ```bash
-sudo env CODEX_ENIKK_CHATTERBOX_REFERENCE_SOURCE=/path/yuki_super-clean.wav ./install.sh
+codex_enikk
+enikk_tts start
+enikk_tts status
+enikk_tts stop
+enikk_tts restart
+enikk_tts update /home/ak/git/codex_enikk
+enikk_tts restart
+enikk_tts rollback RELEASE_ID
+enikk_tts restart
+journalctl --user -u enikk-tts.service
 ```
 
-The installer validates the WAV with `torchaudio`. Updates preserve the existing venv, model
-cache, and reference unless the override is explicitly supplied.
-Set `CODEX_ENIKK_TTS=0` to disable TTS or `CODEX_ENIKK_CHATTERBOX_HOME` to select another
-external Chatterbox directory. TTS failure never prevents the Codex wrapper from running.
+Voice dependencies remain in `~/Apps/chatterbox-yuki/.venv`, with the existing
+`yuki_super-clean.wav` reference, cached model and PulseAudio tools.
+No installer here calls the legacy `tts/setup-tts.sh`.
+`codex_enikk --tts-debug` prints the independent status/log commands; it no longer
+starts or owns a voice worker.
 
-Playback acknowledgements are saved atomically per chunk. Jobs are removed only after all
-chunks are PLAYED. Playback errors are isolated to the item and do not stop the consumer.
-Jobs containing explicit failures are retained as `.failed-*` files in the TTS state `jobs/`
-directory, including the original message, chunk text, and failure reasons. They are parked
-as diagnostics, not automatically retried forever. Each wrapper launch creates a private
-`runs/run-*` namespace for jobs, receipts and stream outboxes. A new launch never imports
-old-run jobs, including unfinished generations, failed jobs or an interrupted old turn.
-Within the same live run, a worker restart can resume unacknowledged chunks; a crash between
-audible playback and acknowledgement can still repeat that chunk in that same run.
+## Ownership and release boundary
 
-Normal exit marks the run cancelled. A worker watchdog validates its owner's PID and process
-start time; owner death or cancellation terminates the worker's private process group,
-including `paplay`. Startup cancels prior runs and stops their identity-checked worker groups.
-Old files remain for diagnosis but are excluded from all new-run delivery. One global model
-lock prevents simultaneous GPU models, while each run has its own launch lock.
+Core: `~/.local/lib/codex_enikk`, `~/.local/state/codex_enikk`.
+Voice: `~/.local/lib/enikk_tts/releases/<hash>` selected by atomic `active` symlink,
+`~/.local/state/enikk_tts`. The running service resolves its release directory
+once, so later updates cannot mix engine modules. Release manifests, compile and
+import checks precede selection. Failed staging leaves the selected release intact.
+Old releases and logs are retained. Update/rollback select files only; restart
+explicitly applies them. A failed model start leaves core running and is reported
+by status; rollback never restores queued speech.
 
-## Sentence streaming (Codex 0.158.0 / 0.160.0)
+Control operations share a local flock. systemd owns the entire voice cgroup
+(`KillMode=control-group`, no automatic restart). Repeated start is idempotent.
+Explicit stop stays stopped. No core process is signalled by voice control.
+The legacy education supervisor cannot restart core; automatic education is paused.
 
-The wrapper starts a private supported Codex app-server and a sentence observer
-by default, retaining the native TUI. Set `CODEX_ENIKK_STREAMING_TTS=0`
-for standalone `--no-daemon` and the completed-message watcher. Other
-Codex versions, missing dependencies, or startup failures use that existing path.
-Setup pins `websocket-client==1.9.0` in the existing Chatterbox venv. Install/update
-copy the helper; reference, existing venv and model cache are preserved.
-Startup reports `tts_mode=starting`, then `streaming` or `legacy_fallback` with a reason.
-The helper subscribes and records the historical turn baseline before opening the native TUI.
-Model/reference loading runs concurrently: `streaming` means the observer is connected, while
-`TTS_READY` in `notify.log` records audio readiness separately. Sentences arriving before audio
-readiness are durably queued in the current run and consumed in order by its worker. They are
-never replayed in a later run. A model readiness timeout logs `TTS_READY_FAILED` and preserves
-current-run pending content without blocking Codex; server/helper startup failure still uses
-the standalone path. Historical ignored turn IDs are saved once, without per-item checkpoints. Runtime mode is also saved
-in the current run's `runtime.log`; timings and subscription details are in `notify.log`.
-
-Before the native TUI opens, the wrapper prints the current run's readiness log path.
-Use `tail -f <that-path>` in another terminal to watch for
-`Yuki TTS ready (16.9s)` (with `— N queued sentences` when applicable).
-This line is emitted once per run only after the existing model-ready handshake;
-elapsed time starts at wrapper entry, and the count covers current-run sentences
-not yet terminal at observation time. Status goes only to `runtime.log`, never to
-the native TUI terminal, conversation history, or `codex-latest.txt`.
-
-Submitting a new user message advances a run-local speech epoch, identified by
-the protocol user item and turn IDs. It cancels only previous speech: the exact
-active playback child is stopped, old pending jobs become stale, and late GPU
-results cannot enter playback. In-flight GPU inference is allowed to finish;
-old retry/split work stops at the next boundary without reloading the model.
-Typing alone does not cancel speech. Reconnect snapshots reconcile the latest
-user before replaying any outbox; persisted user ordinals reject older events.
-READY counts only current-epoch pending sentences. Conversation text, history,
-backup, and the latest mirror are unaffected. Cancellation receipts remain as
-hidden `.stale-*` runtime files and are never automatically replayed.
-
-The private server owns the existing unrestricted permission policy because
-remote resume rejects CLI permission overrides. Its `notify=[]` override disables
-the global completed-answer hook; the JSONL watcher is not started in remote mode.
-Standalone fallback also overrides the global notify hook so only its scoped watcher submits.
-This gives each item one TTS owner without changing the user's global configuration.
-The helper observes the launch thread only; switching threads inside the TUI is
-not yet validated. Server/helper lifecycle is managed by the wrapper. A startup
-failure falls back before launching the TUI, after stopping the candidate helper.
-A helper failure after attachment does not start a second legacy TTS reader.
-
-Complete sentences are durably published before final completion. On reconnect,
-an active item may be missing from `thread/resume`. Its offsetless deltas must not
-be spliced across that gap: the affected turn is reconciled using authoritative
-completed items/snapshots. Only this disconnected interval waits for full text;
-ordinary connected turns continue sentence streaming. On termination, the helper
-gets a bounded final snapshot drain while the server is still alive. Interrupted
-unfinished text is not flushed. A changed consumed prefix fails closed and retains
-the conflict for review.
-
-Korean prose ending in sentence punctuation at the end of a delta is emitted
-immediately, without waiting for whitespace, another sentence, or item completion.
-Each completed sentence owns a separate job. Ambiguous ASCII periods still need
-lookahead to protect decimals, domains and filenames; Markdown code/link interiors
-remain protected. Newlines alone do not complete unfinished prose.
-The five-second isolation fixture verifies that the first job exists on disk
-before a second sentence arrives. Logs expose sentence completion/flush, durable
-job creation, worker visibility, generation and playback monotonic times. A busy
-worker or initial model load can delay generation even after immediate submission.
+See [the complete lifecycle and IPC contract](../docs/tts-separation.md).
 
 ### Bounded Chatterbox recovery
 
@@ -195,4 +134,4 @@ The custom layer keeps narrow, USER-confirmed rules for project names, selected 
 
 Protected spans use input-disjoint markers that must survive exactly once; missing or duplicated markers fail explicitly. Normalization runs before safe chunk splitting, and the guard analyzes the same text sent to generation. Displayed source text and path replacement accounting are retained.
 
-Current app processes are not hot-patched. After a managed update, exit normally and run `codex_enikk --tts-debug` or resume the session to load the new worker.
+Apply voice code with `enikk_tts update /path/to/source` then `enikk_tts restart`. Keep the core running.
