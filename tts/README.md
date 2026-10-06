@@ -162,3 +162,7 @@ The custom layer keeps narrow, USER-confirmed rules for project names, selected 
 Protected spans use input-disjoint markers that must survive exactly once; missing or duplicated markers fail explicitly. Normalization runs before safe chunk splitting, and the guard analyzes the same text sent to generation. Displayed source text and path replacement accounting are retained.
 
 Apply voice code with `enikk_tts update /path/to/source` then `enikk_tts restart`. Keep the core running.
+
+Hash pronunciation accepts adjacent-anchor hex tokens from 7 characters;
+6 or fewer remain excluded. Standalone detection still requires 32 characters,
+and inline/fenced code and machine literals remain protected.

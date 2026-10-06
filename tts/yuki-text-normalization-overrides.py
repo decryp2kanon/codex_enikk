@@ -264,7 +264,7 @@ hostname=host+name wget=w+get gzip=g+zip gunzip=g+un+zip unzip=un+zip cmake=c+ma
 '''.split())
 TECH_PROSE_TOKEN = re.compile(r'```[\s\S]*?```|`[^`]*`|\S+')
 TECH_ASCII = re.compile('[A-Za-z]')
-HASH_HEX = re.compile(r'[0-9a-fA-F]{8,}')
+HASH_HEX = re.compile(r'[0-9a-fA-F]{7,}')
 HASH_ANCHORS = frozenset(('hash', 'commit', 'sha', 'sha1', 'sha-1', 'sha256',
                          'sha-256', 'digest', 'checksum', 'release', 'revision', 'rev'))
 HASH_NAMES = dict(zip('0123456789abcdef',
@@ -274,7 +274,7 @@ HASH_NAMES = dict(zip('0123456789abcdef',
 
 def hash_reading(token, anchored=False):
     """Only a complete hex token; machine punctuation never enters this grammar."""
-    if len(token) < (8 if anchored else 32) or not HASH_HEX.fullmatch(token) or token.isdecimal():
+    if len(token) < (7 if anchored else 32) or not HASH_HEX.fullmatch(token) or token.isdecimal():
         return None
     prefix = token[:7].lower()
     particle = '으로' if prefix[-1] in '17' else '로'
@@ -339,7 +339,7 @@ def technical_prose(text):
         punctuation = raw[len(token):]
         if token.endswith('.') and token.count('.') == 1:
             token, punctuation = token[:-1], '.' + punctuation
-        reading = hash_reading(token, anchored) if len(token) >= 8 else None
+        reading = hash_reading(token, anchored) if len(token) >= 7 else None
         return (reading or lexical_reading(token) or token) + punctuation
     return TECH_PROSE_TOKEN.sub(replace, text)
 # Relative filename tokens and the known digit-bearing extension remain identifiers.

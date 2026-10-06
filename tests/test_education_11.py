@@ -21,7 +21,7 @@ class HashReadingTests(unittest.TestCase):
                 self.assertEqual(tn.normalize(raw), expected)
 
     def test_unseen_lengths_and_case(self):
-        lengths = [(8,'팔'),(10,'십'),(12,'십이'),(16,'십육'),(20,'이십'),
+        lengths = [(7,'칠'),(8,'팔'),(10,'십'),(12,'십이'),(16,'십육'),(20,'이십'),
                    (31,'삼십일'),(32,'삼십이'),(40,'사십'),(64,'육십사'),(77,'칠십칠')]
         for size, reading in lengths:
             value = ('aBcD091e'*10)[:size]
@@ -29,6 +29,12 @@ class HashReadingTests(unittest.TestCase):
             with self.subTest(size=size):
                 self.assertEqual(tn.normalize('hash '+value), '해시 '+expected)
                 self.assertEqual(tn.normalize(value), expected if size >= 32 else value)
+
+    def test_six_or_fewer_excluded_even_with_anchor(self):
+        for value in ('a1', 'abc12', '271cb8', 'abcdef'):
+            self.assertNotIn('시작하는 해시', tn.normalize('commit '+value))
+        self.assertEqual(tn.normalize('commit 271cb86'),
+                         '커밋 투 세븐 원 씨 비 에이트 식스로 시작하는 해시고 총길이 칠 글자')
 
     def test_anchor_scope(self):
         for anchor in ('hash','commit','SHA','SHA1','SHA-1','SHA256','SHA-256',
