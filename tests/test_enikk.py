@@ -71,6 +71,7 @@ class EnikkTests(unittest.TestCase):
         (self.app_root / 'enikk.py').write_text(source)
         shutil.copy2(ROOT / 'latest.py', self.app_root / 'latest.py')
         shutil.copy2(ROOT / 'persistence.py', self.app_root / 'persistence.py')
+        shutil.copy2(ROOT / 'continuity.py', self.app_root / 'continuity.py')
         shutil.copy2(ROOT / 'codex_enikk', self.app_root / 'codex_enikk')
         self.namespace_patch = patch.object(enikk, 'INSTANCE_SOCKET_PREFIX', namespace)
         self.namespace_patch.start()
@@ -125,6 +126,52 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
         self.assertEqual(len(list((self.enikk_data / 'backups').glob('*.tar.gz'))), 2)
         self.assertIn('hello', (self.enikk_data / 'transcripts/codex-session-example-session-part-000001.txt').read_text())
         self.assertIn('Name: Enikk (에닉), exactly E-N-I-K-K.', (self.data / 'AGENTS.md').read_text())
+
+    def test_guarded_restart_missing_pin_or_modified_source_never_launches(self):
+        self.assertEqual(self.run_cli().returncode, 0)
+        capture = self.base / 'args.json'
+        capture.unlink()
+        pin = self.data / 'enikk-continuity.json'
+        saved_pin = pin.read_bytes()
+        pin.unlink()
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 1)
+        self.assertFalse(capture.exists())
+        self.assertFalse(pin.exists())
+        pin.write_bytes(saved_pin)
+        with (self.sessions / 'rollout-example.jsonl').open('ab') as out:
+            out.write(b'corrupt\n')
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 1)
+        self.assertFalse(capture.exists())
+
+    def test_live_integrity_failure_stops_native_child_and_preserves_journal(self):
+        self.assertEqual(self.run_cli().returncode, 0)
+        source = self.app_root / 'enikk.py'
+        source.write_text(source.read_text().replace('time.monotonic() + 60', 'time.monotonic() + .1').replace('stop.wait(2)', 'stop.wait(.05)'))
+        journal = next((self.enikk_data / 'continuity').glob('*/original.jsonl'))
+        original = journal.read_bytes()
+        fake = self.base / 'bin/codex'
+        fake.write_text("#!/usr/bin/env python3\nimport os,time\nfrom pathlib import Path\np=Path(os.environ['CODEX_HOME'])/'sessions/rollout-example.jsonl'\nwith p.open('ab') as out: out.write(b'broken\\n')\ntime.sleep(30)\n")
+        env = self.env | {'PATH': str(self.base / 'bin') + os.pathsep + os.environ['PATH']}
+        result = subprocess.run([str(self.app_root / 'codex_enikk')], cwd=self.base,
+                                env=env, capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('연속성 검사 실패', result.stderr)
+        self.assertEqual(journal.read_bytes(), original)
+
+    def test_guard_cli_audit_and_search_do_not_launch_or_rewrite_instructions(self):
+        self.assertEqual(self.run_cli(prompt='유키짱').returncode, 0)
+        capture = self.base / 'args.json'
+        capture.unlink()
+        instructions = (self.data / 'AGENTS.md').read_bytes()
+        result = self.run_cli('--continuity-check')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(json.loads(result.stdout)['checkpoint_present'])
+        result = self.run_cli('--history-search', '유키짱', '--direct-user-only')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(capture.exists())
+        self.assertEqual((self.data / 'AGENTS.md').read_bytes(), instructions)
 
     def test_identity_is_short_idempotent_and_preserves_global_instructions(self):
         agents = self.data / 'AGENTS.md'
@@ -685,7 +732,7 @@ while True: time.sleep(1)
                 for name in ('codex_enikk', 'codex_session_save.sh'):
                     result = subprocess.run([str(prefix / 'bin' / name), '--version'], env=env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(result.stdout.strip(), 'codex_enikk 2.1.7')
+                    self.assertEqual(result.stdout.strip(), f'codex_enikk {enikk.VERSION}')
                 result = subprocess.run([str(prefix / 'bin/codex_enikk_restore'), '--help'], env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 # A command replaced by the user must survive uninstall.
@@ -714,7 +761,7 @@ while True: time.sleep(1)
         original = session.read_bytes()
         result = subprocess.run(['bash', str(ROOT / 'update.sh')], env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('codex_enikk 2.1.7', result.stdout)
+        self.assertIn(f'codex_enikk {enikk.VERSION}', result.stdout)
         previous = list(lib.glob('previous-*'))
         self.assertEqual(len(previous), 1)
         self.assertEqual((previous[0] / 'enikk.py').read_text(), 'print("old version")\n')

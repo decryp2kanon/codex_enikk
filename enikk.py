@@ -23,9 +23,10 @@ import threading
 import termios
 from datetime import datetime, timezone
 from latest import Mirror
+from continuity import Continuity
 from persistence import DATABASES, snapshots, validate_database, validate_rollouts
 
-VERSION = '2.1.7'
+VERSION = '2.1.8'
 SUPPORTED_CODEX_VERSIONS = frozenset({'0.158.0', '0.160.0'})
 
 
@@ -51,6 +52,8 @@ HELP = '''codex_enikk — 기존 대화를 원래 Codex 화면으로 이어가�
   codex_enikk -i IMAGE        이미지 파일 첨부
   codex_enikk -m MODEL        시작 모델 지정
   codex_enikk --tts-debug     별도 터미널 창에서 현재 TTS 로그 보기
+  codex_enikk --continuity-check   세션·원문·DB 검사 (읽기 전용)
+  codex_enikk --history-search TEXT [--direct-user-only]  보존 원문 검색
   codex_enikk --help          도움말
   codex_enikk --version       버전
 
@@ -925,6 +928,21 @@ def main(args=None):
     if args == ['--version']:
         print(f'codex_enikk {VERSION}')
         return 0
+    evidence = Continuity(codex_home(), data_dir() / 'continuity')
+    if args == ['--continuity-check']:
+        evidence.require_binding()
+        pin = json.loads((codex_home() / 'enikk-continuity.json').read_text())['session_id']
+        matches = [p for p, m in session_metadata() if m['id'] == pin]
+        if len(matches) != 1:
+            raise ValueError('Pinned rollout missing or ambiguous')
+        print(json.dumps(evidence.inspect(pin, matches[0], allow_partial=True), ensure_ascii=False))
+        return 0
+    if args[:1] == ['--history-search']:
+        if len(args) not in (2, 3) or len(args) == 3 and args[2] != '--direct-user-only':
+            raise ValueError('Usage: --history-search TEXT [--direct-user-only]')
+        for item in evidence.search(args[1], direct_user_only=len(args) == 3):
+            print(json.dumps(item, ensure_ascii=False))
+        return 0
     if args[:1] == ['--resume']:
         args.pop(0)
     if shutil.which('codex') is None:
@@ -939,7 +957,13 @@ def main(args=None):
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 raise ValueError('이미 이 대화를 이어가는 앱이 실행 중입니다.')
+            evidence.require_binding()
             session_id = pinned_session()
+            matches = [p for p, m in session_metadata() if m['id'] == session_id]
+            if len(matches) != 1:
+                raise ValueError('Pinned rollout missing or ambiguous')
+            rollout = matches[0]
+            evidence.inspect(session_id, rollout, save=True)
             backup()
             cwd = Path.cwd()
             output = transcript_dir()
@@ -947,11 +971,20 @@ def main(args=None):
             stop = threading.Event()
             save_errors = set()
             def watcher():
+                next_checkpoint = time.monotonic() + 60
                 while not stop.wait(2):
                     try:
                         export_changed(baseline, cwd, output, session_id, latest=False)
                     except (OSError, ValueError) as exc:
-                        save_errors.add(str(exc))  # Do not corrupt the active TUI.
+                        save_errors.add(str(exc))
+                    if time.monotonic() >= next_checkpoint:
+                        try:
+                            evidence.inspect(session_id, rollout, save=True, allow_partial=True)
+                        except (OSError, ValueError, sqlite3.Error) as exc:
+                            print(f'연속성 검사 실패: {exc}. 원문을 보존하고 실행을 종료합니다.', file=sys.stderr)
+                            os.kill(os.getpid(), signal.SIGTERM)
+                            return
+                        next_checkpoint = time.monotonic() + 60
             thread = threading.Thread(target=watcher, daemon=True)
             thread.start()
             status = 1
@@ -962,10 +995,11 @@ def main(args=None):
                 thread.join()
                 for error in sorted(save_errors):
                     print(f'대화문 저장 경고: {error}', file=sys.stderr)
-                for operation in (lambda: export_changed(baseline, cwd, output, session_id, latest=False), backup):
+                for operation in (lambda: evidence.inspect(session_id, rollout, save=True),
+                                  lambda: export_changed(baseline, cwd, output, session_id, latest=False), backup):
                     try:
                         operation()
-                    except (OSError, ValueError) as exc:
+                    except (OSError, ValueError, sqlite3.Error) as exc:
                         print(f'종료 시 저장 실패: {exc}. 원본 세션은 CODEX_HOME에 남아 있습니다.', file=sys.stderr)
                         if status == 0:
                             status = 1
