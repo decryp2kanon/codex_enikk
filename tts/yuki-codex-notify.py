@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parent
 # 작성자: 에닉(유키짱)
 # Load the existing custom module once; no upstream or model is initialized.
 _symbol_custom = None
+MACHINE_CLEANUP_HINT = re.compile(r'[`{\[=/@]')
 if (ROOT / 'yuki-text-normalization-overrides.py').is_file():
     _symbol_spec = importlib.util.spec_from_file_location(
         'notify_custom_symbols', ROOT / 'yuki-text-normalization-overrides.py')
@@ -99,6 +100,10 @@ def advance_epoch(thread, turn, user, ordinal=None, state=None):
 
 def clean_text(text):
     # Keep source immutable; structural readings are a spoken representation.
+    literals = {}
+    if _symbol_custom is not None and MACHINE_CLEANUP_HINT.search(text):
+        text, literals = _symbol_custom.mask_machine_literals(
+            text, inline_commands_only=True, hide_fences=True)
     if _symbol_custom is not None:
         text = _symbol_custom.markdown_spoken(text)
     text = re.sub(r"```[\s\S]*?```", " ", text)
@@ -115,10 +120,15 @@ def clean_text(text):
             continue
         line = re.sub(r"^\s*(?:#{1,6}\s*|>\s*|[-*+]\s+|\d+[.)]\s+)", "", line)
         lines.append(line)
-    text = "\n".join(lines).replace("**", "").replace("__", "")
+    # markdown_spoken already handles actual emphasis. Blind replacement here
+    # corrupts identifiers and machine values such as foo__bar or URL wildcards.
+    text = "\n".join(lines)
     text = re.sub(r"[^\S\n]+", " ", text)
     text = re.sub(r"\n(?:[ \t]*\n)+", "\n\n", text)
-    return text.strip()
+    text = text.strip()
+    if _symbol_custom is not None and literals:
+        text = _symbol_custom.restore_machine_literals(text, literals)
+    return text
 
 
 def log_status(message):

@@ -444,15 +444,120 @@ def technical_prose(text):
 # The production path reads original maximal tokens once. Legacy callback
 # protection below remains a separate compatibility contract, not a sequence
 # of transforms through which every independent TTS request must pass.
-COMMON_SOURCE_TOKEN = re.compile(r'```[\s\S]*?(?:```|$)|`[^`]*(?:`|$)|\S+')
+COMMON_SOURCE_TOKEN = re.compile(
+    r'(?P<fence>```[\s\S]*?(?:```|\Z)|~~~[^\n]*\n[\s\S]*?(?:~~~|\Z))'
+    r'|(?P<inline>`[^`]*(?:`|\Z))'
+    r'|(?P<assignment>(?<!\S)[A-Za-z_][A-Za-z0-9_]*='
+    r'(?:"(?:\\.|[^"\\\n])*(?:"|$)|\x27[^\x27\n]*(?:\x27|$)))'
+    r'|(?P<link>!?\[[^\]\n]*\]\([^\)\n]*\))'
+    r'|(?P<token>\S+)', re.MULTILINE)
+COMMON_PLAIN_TOKEN = re.compile(r'\S+')
+COMMON_LITERAL_HINT = re.compile(r'[`"\x27{\[]|~~~')
 COMMON_SUFFIX = re.compile(r'([^가-힣]+)([가-힣]+)')
 COMMON_ENDING = re.compile(PROSE_ENDING +
     r'|하(?:며|고|면|는|기|다|겠습니다|세요|지|도록)|합니다|해(?:요|서|도)?|했(?:다|고|으며|습니다)')
 COMMON_COUNTERS = frozenset(('개', '회', '초', '명', '건'))
 COMMON_GROUPED = re.compile(r'[1-9][0-9]{0,2}(?:,[0-9]{3})+')
 COMMON_JSON = json.JSONDecoder()
+COMMON_JSON_START = re.compile(r'\{\s*(?:"|})|\[\s*(?:\{|"|[0-9-]|true|false|null)')
 COMMON_FOLLOWING_UNIT = re.compile(r'[ \t]+([^\s`]+)')
 COMMON_FOLLOWING_SWITCH = re.compile(r'[ \t]+switch(?=[가-힣\s.,!?]|$)')
+
+
+def machine_container_end(text, start):
+    """Fail closed on a malformed JSON-looking container, without repair."""
+    closing = []
+    quoted = escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if quoted:
+            if escaped:
+                escaped = False
+            elif char == '\\':
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+        elif char in '{[':
+            closing.append('}' if char == '{' else ']')
+        elif char in '}]':
+            if not closing or char != closing.pop():
+                return index + 1
+            if not closing:
+                return index + 1
+    return len(text)
+
+
+def source_spans(text):
+    """Yield original offsets and opaque machine containers in one walk."""
+    consumed = 0
+    pattern = COMMON_SOURCE_TOKEN if COMMON_LITERAL_HINT.search(text) else COMMON_PLAIN_TOKEN
+    for match in pattern.finditer(text):
+        start, end = match.span()
+        if start < consumed:
+            continue
+        kind = match.lastgroup or 'token'
+        if kind == 'token' and text[start] in '{[' and COMMON_JSON_START.match(text, start):
+            try:
+                value, container_end = COMMON_JSON.raw_decode(text, start)
+            except (ValueError, RecursionError):
+                end = machine_container_end(text, start)
+                kind = 'machine'
+            else:
+                if isinstance(value, (dict, list)) and (container_end >= end or
+                        not text[container_end:end].strip(',!?;.')):
+                    end, kind = container_end, 'machine'
+            consumed = end
+        yield kind, start, end, text[start:end]
+
+
+def machine_inline(value):
+    """Keep simple displayed words readable; actual commands stay opaque."""
+    return (any(char.isspace() for char in value) or
+            any(char in value for char in '/=@:(){}[]') or
+            value.startswith('-') or bool(HASH_HEX.search(value)))
+
+
+def mask_machine_literals(text, inline_commands_only=False, hide_fences=False):
+    """Protect source containers during Markdown cleanup, then restore once."""
+    if symbol_reading(text.strip()) is not None:
+        return text, {}
+    output, replacements = [], {}
+    available = (chr(i) for i in range(0xE000, 0xF900) if chr(i) not in text)
+    cursor = 0
+    for kind, start, end, raw in source_spans(text):
+        opaque = kind in ('machine', 'assignment')
+        if kind == 'inline':
+            opaque = not inline_commands_only or machine_inline(raw[1:-1])
+        if kind == 'token':
+            token = raw.rstrip(',!?;.')
+            opaque = (('://' in token and not token.startswith(('[', '!['))) or '@' in token or
+                      token.startswith(('/', '~/', './', '../', '--')))
+        if kind != 'fence' and symbol_reading(raw) is not None:
+            opaque = False
+        output.append(text[cursor:start])
+        if kind == 'fence' and hide_fences:
+            output.append(' ')
+        elif opaque:
+            marker = next(available, None)
+            if marker is None:
+                raise ValueError('too many machine literal spans')
+            replacements[marker] = raw
+            output.append(marker)
+        else:
+            output.append(raw)
+        cursor = end
+    output.append(text[cursor:])
+    return ''.join(output), replacements
+
+
+def restore_machine_literals(text, replacements):
+    for marker, value in replacements.items():
+        if text.count(marker) != 1:
+            raise RuntimeError('machine literal span lost or duplicated')
+        text = text.replace(marker, value)
+    return text
 
 
 def prose_parts(token):
@@ -481,6 +586,11 @@ def prose_value(token, anchored=False, reference=False):
     if '·' in token:
         if PROSE_DOT_LIST.fullmatch(token):
             return '·'.join(prose_value(part) or part for part in token.split('·'))
+        return None
+    registered = COMMON_LEXICAL_READINGS.get(body)
+    if registered is not None:
+        return registered + ending
+    if body and '가' <= body[0] <= '힣':
         return None
     reading = None
     if not verb and len(body) >= 7:
@@ -515,13 +625,11 @@ def common_prose(text):
     previous = None
     previous_end = 0
     consumed_until = 0
-    for match in COMMON_SOURCE_TOKEN.finditer(text):
-        if match.start() < consumed_until:
+    for kind, start, end, raw in source_spans(text):
+        if start < consumed_until:
             continue
-        raw = match[0]
         if raw.startswith('&'):
             raw = PROSE_SPACE_ENTITY.sub('', raw)
-        start, end = match.span()
         output.append(text[cursor:start])
         adjacent = '\n' not in text[previous_end:start] and '\r' not in text[previous_end:start]
         anchored = adjacent and previous in HASH_ANCHORS
@@ -532,20 +640,12 @@ def common_prose(text):
             previous, previous_end = None, end
             cursor = end
             continue
-        # Decode only at an object/array boundary, never scan all words for JSON.
-        if raw[:1] in ('{', '['):
-            try:
-                value, json_end = COMMON_JSON.raw_decode(text, start)
-            except (ValueError, RecursionError):
-                pass
-            else:
-                if isinstance(value, (dict, list)) and (json_end >= end or
-                        not text[json_end:end].strip(',!?;.')):
-                    output.append(text[start:json_end])
-                    cursor = consumed_until = json_end
-                    previous, previous_end = None, json_end
-                    continue
-        if raw.startswith('`'):
+        if kind in ('machine', 'assignment', 'fence'):
+            output.append(raw)
+            previous, previous_end = None, end
+            cursor = end
+            continue
+        if kind == 'inline':
             reading = None
             if anchored and not raw.startswith('``') and raw.endswith('`'):
                 reading = hash_reading(raw[1:-1], anchored=True)
@@ -701,6 +801,9 @@ SYMBOL_DIRECT = {atom * count: name + (' ' + korean_cardinal(str(count)) + ' 개
                  for atom, name in SYMBOL_ATOMS.items() for count in range(1, 9)}
 SYMBOL_DIRECT.update(SYMBOL_OPERATORS)
 PROSE_READINGS.update(SYMBOL_DIRECT)
+COMMON_LEXICAL_READINGS = {**PROSE_READINGS, **COMMON_NAMES}
+COMMON_LEXICAL_READINGS.update({word: lexical_reading(word)
+    for word in TECH_ABBREVIATIONS | TECH_COMPOUNDS | TECH_COMPONENTS.keys()})
 SYMBOL_KEYS = tuple(sorted(SYMBOL_OPERATORS, key=lambda key: (-len(key), key)))
 SYMBOL_HINT = re.compile(r'[#*_+=<>:;.,/\\|&!?@$%^~`\'"()\[\]{}-]')
 SYMBOL_OR_CUSTOM = re.compile(r'[A-Za-z0-9#*_+=<>:;.,/\\|&!?@$%^~`\'"()\[\]{}-]')
@@ -739,7 +842,7 @@ def symbol_prose(text):
     isolated = symbol_reading(text.strip())
     if isolated is not None:
         return isolated
-    if '`' in text:
+    if '`' in text or ('~~~' in text and '\n' in text):
         return text
     text = MARKDOWN_HEADING.sub(lambda m: korean_cardinal(str(len(m[1]))) + ' 단계 제목 ' + m[2], text)
     return SYMBOL_WORD.sub(lambda m: symbol_reading(m[0]) or m[0], text)
@@ -752,17 +855,9 @@ def markdown_spoken(text):
         return isolated
     if not any(marker in text for marker in ('#', '*', '_', '~', '`', '<')):
         return text
-    # Complete/unfinished fences are never reintroduced into speech.
-    text = re.sub(r'(?m)^\s*(```|~~~)[^\n]*\n[\s\S]*?(?:^\s*\1[^\n]*$|\Z)', ' ', text)
-    inline = {}
-    available = (chr(i) for i in range(0xE000, 0xF900) if chr(i) not in text)
-    def protect_inline(match):
-        marker = next(available, None)
-        if marker is None:
-            raise ValueError('too many inline code spans')
-        inline[marker] = match[0]
-        return marker
-    text = re.sub(r'`[^`]*(?:`|$)', protect_inline, text)
+    # The same source span policy protects code, JSON, assignments and address
+    # values before interpreting structural Markdown markers.
+    text, inline = mask_machine_literals(text, hide_fences=True)
     text = MARKDOWN_HEADING.sub(lambda m: korean_cardinal(str(len(m[1]))) + ' 단계 제목 ' + m[2], text)
     text = re.sub(r'<!--([\s\S]*?)-->', lambda m: ' 에이치티엠엘 주석 ' + m[1] + ' 주석 끝 ', text)
     text = re.sub(r'</?([A-Za-z][A-Za-z0-9-]*)\s*/?>',
@@ -776,9 +871,7 @@ def markdown_spoken(text):
         escaped = re.escape(marker)
         pattern = r'(?<!\S)' + escaped + r'([^\n]+?)' + escaped + r'(?![\w*~_`])'
         text = re.sub(pattern, lambda m: label + ' ' + m[1] + ' 강조 끝', text)
-    for marker, raw in inline.items():
-        text = text.replace(marker, raw)
-    return text
+    return restore_machine_literals(text, inline)
 
 
 def normalize_with_exceptions(text, normalize=None):
@@ -821,7 +914,7 @@ def normalize_with_exceptions(text, normalize=None):
             return isolated
         # Preserve the existing code policy: never interpret heading lines
         # inside a fence, or strip code delimiters before span protection.
-        if '`' not in text:
+        if '`' not in text and '~~~' not in text:
             text = MARKDOWN_HEADING.sub(lambda m: korean_cardinal(str(len(m[1]))) + ' 단계 제목 ' + m[2], text)
         # Independent production never invokes a weekday-rewriting callback.
         # Preserve the duration policy but omit its obsolete phrase shields.
@@ -908,14 +1001,32 @@ PATH_EXTENSIONS = {
 PATH_NAMES = {'yuki': '유키', 'engine': '엔진', 'enikk': '에닉', 'readme': '리드미',
          'install': '인스톨', 'license': '라이선스', 'changelog': '체인지로그',
          'makefile': '메이크파일', 'chatterbox': '채터박스', 'test': '테스트', 'output': '아웃풋',
-         'approval': '승인', 'marker': '표시'}
+         'approval': '승인', 'marker': '표시', 'report': '리포트'}
+VERSIONED_FILENAME = re.compile(r'([A-Za-z][A-Za-z0-9_-]*)_v([0-9]+(?:\.[0-9]+)*)')
 # Delimited paths may contain Korean filenames. Attached Korean particles
 # after a known extension are prose, not part of that filename.
 PATH_PATTERN = re.compile(
     r"(?<![\w/:.])(?P<path>`?(?:(?:/(?:home|tmp|usr|etc|var|opt)/|~/|\.\.?/)[^\s`\"'<>()[\]{}]+"
-    r"|(?P<known_report>(?<![@-])report_v31\.1\.md(?![A-Za-z0-9_-]|\.[A-Za-z0-9_])))`?)"
-    r"(?(known_report)(?:(?P<filename_particle>으로|에서|을|를|은|는|이|가|에|로|와|과|도)(?=\s|[.!?,]|$))?|)"
-    r"(?:\s+(?:파일|경로)(?P<particle>에서|으로|을|를|은|는|이|가|에|로|(?(known_report)도|(?!)))?(?=\s|[.!?,]|$))?")
+    r"|(?P<versioned_file>(?<![@=+-])[A-Za-z][A-Za-z0-9_-]*_v[0-9]+(?:\.[0-9]+)*\."
+    r"(?:" + '|'.join(re.escape(ext) for ext in sorted(PATH_EXTENSIONS, key=lambda v: -len(v))) +
+    r")(?![A-Za-z0-9_-]|\.[A-Za-z0-9_])))`?)"
+    r"(?(versioned_file)(?:(?P<filename_particle>으로|에서|을|를|은|는|이|가|에|로|와|과|도)(?=\s|[.!?,]|$))?|)"
+    r"(?:\s+(?:파일|경로)(?P<particle>에서|으로|을|를|은|는|이|가|에|로|(?(versioned_file)도|(?!)))?(?=\s|[.!?,]|$))?")
+
+
+def versioned_filename(stem):
+    """Known lexical components + arbitrary version; no full basename lookup."""
+    match = VERSIONED_FILENAME.fullmatch(stem)
+    if match is None:
+        return None
+    components = [PATH_NAMES.get(part.lower()) or lexical_reading(part)
+                  for part in re.split('[-_]', match[1])]
+    numbers = match[2].split('.')
+    if any(part is None for part in components) or any(len(n) > 32 for n in numbers):
+        return None
+    versions = [(' '.join(_CARDINAL_DIGITS[int(c)] for c in n)
+                 if len(n) > 1 and n.startswith('0') else korean_cardinal(n)) for n in numbers]
+    return ' '.join(components) + ' 버전 ' + ' 점 '.join(versions)
 
 @lru_cache(maxsize=256)
 def path_component(value):
@@ -982,8 +1093,22 @@ def normalize_paths(text):
     """
     extensions, names, pattern = PATH_EXTENSIONS, PATH_NAMES, PATH_PATTERN
     records = []
+    # Single displayed paths retain the existing path-description policy.
+    # Commands, assignments, JSON and fences must remain machine literals.
+    opaque = []
+    if any(marker in text for marker in ('`', '~~~', '{', '[', '=')):
+        for kind, start, end, raw in source_spans(text):
+            if kind in ('machine', 'assignment', 'fence', 'link') or (kind == 'inline' and
+                    not PATH_PATTERN.fullmatch(raw)):
+                opaque.append((start, end))
+    opaque_index = 0
 
     def replace(match):
+        nonlocal opaque_index
+        while opaque_index < len(opaque) and opaque[opaque_index][1] <= match.start():
+            opaque_index += 1
+        if opaque_index < len(opaque) and opaque[opaque_index][0] < match.end():
+            return match.group()
         raw = match.group('path')
         surrounding = surrounding_token(text, *match.span())
         if '://' in surrounding or '@' in surrounding:
@@ -1007,10 +1132,11 @@ def normalize_paths(text):
                    or any(len(token) > 20 for token in re.split(r'[-_.]', stem)))
         spoken = '' if machine else ' '.join(names.get(token.lower(), token)
                                              for token in re.split(r'[-_.]+', stem) if token)
-        if basename == 'report_v31.1.md':
-            # USER-confirmed bad filename reading; preserve original/span accounting.
-            # Keep version digits unchanged, and do not rewrite ordinary 'report'.
-            spoken = '리포트 버전 31 점 1'
+        version = versioned_filename(stem)
+        if match.group('versioned_file') and version is None:
+            return match.group()
+        if version is not None:
+            spoken = version
         kind = '경로' if '/' in path else ''
         result = (project_path_description(path, extensions) or
                   ' '.join(filter(None, (spoken, description, kind))))
