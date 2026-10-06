@@ -83,7 +83,7 @@ class UpstreamDictionaryTests(unittest.TestCase):
         self.assertEqual(source.count('_orchestrator.Service'), 1)
         self.assertIn('_service = Client()', source)
         self.assertIn('CODEX_ENIKK_TTS_UPSTREAM', orchestrator)
-        self.assertIn('self.custom.normalize_with_exceptions(text, nemo.normalize)', orchestrator)
+        self.assertIn('self.custom.normalize_with_exceptions(text, upstream_adapter.normalize)', orchestrator)
 
 
 if __name__ == '__main__':

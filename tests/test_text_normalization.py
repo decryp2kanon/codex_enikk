@@ -33,6 +33,9 @@ class NormalizationTests(unittest.TestCase):
             c.initialize()
             self.assertIsNone(c.process)
             self.assertEqual(c.normalize('Yuki 8 GB'), '유키 8 GB')
+            self.assertEqual(c.upstream_status(), {
+                'enabled': False, 'source': 'default',
+                'dictionary': False, 'adapter': False})
 
     def test_failed_child_never_claims_ready(self):
         c = load_nemo_adapter().Client()
@@ -73,19 +76,19 @@ class NormalizationTests(unittest.TestCase):
                 popen.assert_not_called()
             service.close()
 
-    def test_removed_nemo_files_do_not_break_public_custom_only_api(self):
+    def test_removed_upstream_files_do_not_break_public_custom_only_api(self):
         with tempfile.TemporaryDirectory() as missing, \
                 patch.dict(os.environ, {'CODEX_ENIKK_TTS_UPSTREAM': '0',
                                         'CODEX_ENIKK_TN_HOME': str(Path(missing) / 'no-nemo-home')}), \
                 patch.object(tn._orchestrator, '_load_source',
-                             side_effect=AssertionError('NeMo/dictionary path was touched')), \
+                             side_effect=AssertionError('upstream path was touched')), \
                 patch.object(subprocess, 'Popen') as popen:
             tn.initialize()
             self.assertEqual(tn.normalize('Yuki CPU and AI'), '유키 씨피유 and AI')
             self.assertIsNone(tn._service.process)
             popen.assert_not_called()
 
-    def test_enabled_order_keeps_dictionary_custom_and_nemo_layers_separate(self):
+    def test_enabled_order_keeps_dictionary_custom_and_upstream_layers_separate(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'selected_korean_dictionary.py').write_text(
@@ -96,6 +99,9 @@ class NormalizationTests(unittest.TestCase):
             with patch.dict(os.environ, {'CODEX_ENIKK_TTS_UPSTREAM': '1'}):
                 service.initialize()
                 self.assertEqual(service.normalize('AI Yuki'), '에이아이 유키')
+                self.assertEqual(service.upstream_status(), {
+                    'enabled': True, 'source': 'explicit',
+                    'dictionary': True, 'adapter': True})
             service.close()
 
     def test_core_environment_not_used(self):

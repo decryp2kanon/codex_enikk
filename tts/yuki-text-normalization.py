@@ -29,6 +29,7 @@ class Client(_orchestrator.Service):
 _service = Client()
 initialize = _service.initialize
 normalize = _service.normalize
+upstream_status = _service.upstream_status
 close = _service.close
 
 
