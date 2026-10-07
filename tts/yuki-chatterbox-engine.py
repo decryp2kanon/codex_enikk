@@ -82,7 +82,7 @@ def segment_drop_reason(segment):
     return None
 
 
-def speech_chunks(text, minimum=20, target=28, maximum=55):
+def speech_chunks(text, minimum=20, target=28, maximum=55, *, first_target=0, source_text=None, remainder_target=0):
     """Keep generation bounded while preserving words and natural sentence ends."""
     chunks = []
     current = ""
@@ -108,10 +108,35 @@ def speech_chunks(text, minimum=20, target=28, maximum=55):
             chunks[-1] = f"{chunks[-1]} {current}"
         else:
             chunks.append(current)
+    # Experimental first phrase: raw Korean prose only. Machine values and
+    # translated technical tokens never become eligible merely by normalizing.
+    early = False
+    if (first_target and chunks and source_text is not None
+            and re.match(r"^[가-힣]+\s+[가-힣]+(?:\s|[,.!?])", source_text)):
+        words = chunks[0].split()
+        source_words = source_text[:maximum + 1].split()
+        left = ""
+        for index, word in enumerate(words[:6], 1):
+            if (index > len(source_words) or word != source_words[index - 1]
+                    or not re.fullmatch(r"[가-힣]+", word)):
+                break
+            left = f"{left} {word}".strip()
+            right = " ".join(words[index:])
+            if len(left) > first_target + 2:
+                break
+            if index >= 2 and len(left) >= max(6, first_target - 2) and len(right) >= 12:
+                if remainder_target:
+                    remainder = " ".join([right, *chunks[1:]])
+                    chunks = [left, *speech_chunks(
+                        remainder, minimum=12, target=remainder_target, maximum=maximum)]
+                else:
+                    chunks[:1] = [left, right]
+                early = True
+                break
     # A complete connective clause can lead a response without waiting for
     # the entire merged sentence. Keep words, punctuation and the remainder;
     # never create a tiny greeting or split an arbitrary word boundary.
-    if chunks and 32 <= len(chunks[0]) <= maximum:
+    if not early and chunks and 32 <= len(chunks[0]) <= maximum:
         leading = recovery_clauses(chunks[0])
         if len(leading) == 2:
             left, right = leading
@@ -639,7 +664,7 @@ def run():
                             failed.finish(number, 'failed', 'normalization: ' + str(error))
                     log(f"Chatterbox normalization_failed job={item['id']} error={error!r}")
                     continue
-                originals = speech_chunks(normalized_text)
+                originals = speech_chunks(normalized_text, first_target=16, source_text=item["text"], remainder_target=25)
                 candidates = originals
                 parts = []
                 for index, candidate in enumerate(candidates):

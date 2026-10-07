@@ -434,7 +434,7 @@ class DeliveryTests(unittest.TestCase):
         self.scope.update(STATE=self.root, JOBS=jobs, REFERENCE=reference,
             torch=types.SimpleNamespace(cuda=types.SimpleNamespace(is_available=lambda: False, empty_cache=Mock())),
             ChatterboxMultilingualTTS=types.SimpleNamespace(from_pretrained=lambda **kw:model),
-            conditioning_state=lambda m:'test', speech_chunks=lambda text:text.split('|'),
+            conditioning_state=lambda m:'test', speech_chunks=lambda text, **kwargs:text.split('|'),
             korean_pronunciation=lambda text:text,
             trim_edge_silence=lambda wav,sr:(wav,0,0),
             suspicious_audio=lambda wav,sr,text:(False,'',.01),

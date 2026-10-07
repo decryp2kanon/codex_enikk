@@ -36,7 +36,7 @@ class NormalizationTests(unittest.TestCase):
         self.assertNotIn('KOREAN_TECH', engine)
         self.assertNotIn('normalize_numbers', engine)
         self.assertIn('normalized_text = korean_pronunciation(spoken_text)', engine)
-        self.assertIn('originals = speech_chunks(normalized_text)', engine)
+        self.assertIn('originals = speech_chunks(normalized_text,', engine)
 
 
 class WorkerNormalizationFailureTests(unittest.TestCase):
