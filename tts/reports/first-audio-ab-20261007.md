@@ -1,6 +1,6 @@
 # First Audio A/B: first natural clause candidate
 
-Final status: user authorized adoption with a known volume regression. Listening confirmed both versions sound natural, but B sounds quieter. Backend timing improvement is observed; no physical speaker/device onset or ending is claimed. Volume investigation follows deployment; this is not a complete quality PASS.
+Final status: adopted with explicit user authorization. Listening confirmed natural speech and, after deployment, no volume problem. Backend timing improvement is observed; no physical speaker/device onset or ending is claimed. The earlier recording amplitude difference remains unexplained.
 
 Baseline main/origin: 9bb67202b5f6867c12205c9fcc94dac69cf2aa06; rollback release: 6466cb74f9c19b11; candidate release: b9b120d6ebeb129c. One candidate tested; no commit/push.
 
@@ -78,3 +78,9 @@ Rollback verified: active 6466cb74f9c19b11, installed engine equals the saved ba
 ## User-authorized adoption and volume follow-up
 
 The user explicitly requested applying the candidate first, then addressing reduced volume. Representative A/B full-recording RMS: -35.489 / -44.045 dBFS. Across 20 Korean recordings, median RMS: -36.817 / -43.685 dBFS. Full-recording RMS includes pauses and must not be treated as a perceptual loudness measurement. The candidate changes chunk boundaries only; the cause of the amplitude difference remains unconfirmed. No gain compensation is included in this commit. Baseline release remains available for rollback.
+
+## Deployment and final listening confirmation
+
+Implementation commit dd58e69c192ce936d26c57a11b22db6fc53e5e3b was pushed to main. Active release b9b120d6ebeb129c matches the source engine; ready/model_ready/playback_available are true and last_error is null. Enikk/Codex core PIDs and start times remain unchanged.
+
+After restart, two Korean diagnostic recordings measured -29.838 and -29.126 dBFS RMS; one unchanged hash input measured -28.245 dBFS. Observed playback streams used 100% (0 dB) gain. These are diagnostics, not replacement A/B samples. The earlier low amplitude was not reproduced; its cause is unconfirmed. No amplitude compensation code was added. The user listened to the current recording and explicitly confirmed there is no volume problem.
