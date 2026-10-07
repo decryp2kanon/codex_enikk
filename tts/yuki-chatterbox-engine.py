@@ -108,6 +108,20 @@ def speech_chunks(text, minimum=20, target=28, maximum=55):
             chunks[-1] = f"{chunks[-1]} {current}"
         else:
             chunks.append(current)
+    # A complete connective clause can lead a response without waiting for
+    # the entire merged sentence. Keep words, punctuation and the remainder;
+    # never create a tiny greeting or split an arbitrary word boundary.
+    if chunks and 32 <= len(chunks[0]) <= maximum:
+        leading = recovery_clauses(chunks[0])
+        if len(leading) == 2:
+            left, right = leading
+            clause_end = re.search(
+                r'(?:으며|면서|지만|하고|이고|하며|때문에|으면|다면|라면|하면|되면|며)[,;:]?$',
+                left.split()[-1])
+            if (clause_end and 14 <= len(left) <= target
+                    and len(left.split()) >= 3 and len(right) >= 12
+                    and len(right.split()) >= 2):
+                chunks[:1] = leading
     return chunks
 
 
