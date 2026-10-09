@@ -672,7 +672,9 @@ def terminal_restore():
         candidate = sys.stdin.fileno()
         if os.isatty(candidate):
             saved = termios.tcgetattr(candidate)
-            fd = os.dup(candidate)
+            # stdin may be read-only; DEC cleanup needs a writable descriptor
+            # for this exact terminal (never another process's terminal).
+            fd = os.open(os.ttyname(candidate), os.O_RDWR | os.O_NOCTTY | os.O_CLOEXEC)
     except (AttributeError, OSError, ValueError, termios.error):
         pass
 
@@ -680,13 +682,25 @@ def terminal_restore():
         nonlocal restored
         if fd is None or restored:
             return
+        # Disable reports before restoring shell echo. Each cleanup step is
+        # independent, so a failed ioctl cannot skip the DEC-mode reset.
         try:
-            termios.tcsetattr(fd, termios.TCSANOW, saved)
-            # DEC modes are not part of termios: stop mouse/paste reports,
-            # leave the alternate screen and make the shell cursor visible.
-            os.write(fd, b'\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l'
-                         b'\x1b[?1006l\x1b[?1015l\x1b[?2004l\x1b[?1049l'
-                         b'\x1b[0m\x1b[?25h\r\x1b[J')
+            reset = (b'\x1b[?9l\x1b[?1000l\x1b[?1001l\x1b[?1002l\x1b[?1003l'
+                     b'\x1b[?1004l\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?1016l'
+                     b'\x1b[?2004l\x1b[?1049l\x1b[0m\x1b[?25h\r\x1b[J')
+            pending = memoryview(reset)
+            while pending:
+                written = os.write(fd, pending)
+                if not written:
+                    raise OSError('terminal cleanup made no progress')
+                pending = pending[written:]
+            termios.tcdrain(fd)
+        except (OSError, termios.error):
+            pass
+        try:
+            # Discard unread TUI input (including queued mouse reports/paste)
+            # instead of allowing it to become shell commands after exit.
+            termios.tcsetattr(fd, termios.TCSAFLUSH, saved)
             restored = True
         except (OSError, termios.error):
             pass  # A closed terminal must not prevent session cleanup.

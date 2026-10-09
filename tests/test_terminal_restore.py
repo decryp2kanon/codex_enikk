@@ -48,3 +48,45 @@ class TerminalRestoreTests(unittest.TestCase):
             with enikk.terminal_restore() as restore:
                 restore()
             write.assert_not_called()
+
+    def test_read_only_stdin_still_disables_mouse(self):
+        master, slave = pty.openpty()
+        try:
+            with open(os.ttyname(slave), 'r') as stream, patch.object(sys, 'stdin', stream):
+                with enikk.terminal_restore():
+                    tty.setraw(slave)
+            import select
+            self.assertTrue(select.select([master], [], [], 1)[0])
+            data = os.read(master, 4096)
+            self.assertIn(b'\x1b[?1003l', data)
+            self.assertIn(b'\x1b[?1016l', data)
+        finally:
+            os.close(master)
+            os.close(slave)
+
+    def test_queued_mouse_input_is_not_returned_to_shell(self):
+        master, slave = pty.openpty()
+        try:
+            with os.fdopen(os.dup(slave), 'r') as stream, patch.object(sys, 'stdin', stream):
+                with enikk.terminal_restore():
+                    tty.setraw(slave)
+                    os.write(master, b'\x1b[<35;46;54M\n')
+                    import select
+                    self.assertTrue(select.select([slave], [], [], 1)[0])
+                self.assertFalse(select.select([slave], [], [], 0)[0])
+        finally:
+            os.close(master)
+            os.close(slave)
+
+    def test_failed_attribute_restore_does_not_skip_mouse_reset(self):
+        master, slave = pty.openpty()
+        try:
+            with os.fdopen(os.dup(slave), 'r') as stream, patch.object(sys, 'stdin', stream):
+                with patch.object(termios, 'tcsetattr', side_effect=OSError('test')):
+                    with enikk.terminal_restore():
+                        pass
+                # Verify normal output separately from kernel attributes.
+            self.assertIn(b'\x1b[?1003l', os.read(master, 4096))
+        finally:
+            os.close(master)
+            os.close(slave)
