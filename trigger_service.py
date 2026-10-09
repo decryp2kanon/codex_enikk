@@ -199,7 +199,8 @@ class Service:
         self.observer = Session(self)
         self.observer.call('initialize', {'clientInfo': {'name': 'enikk_submission_arbiter', 'version': '1'}})
         self.observer.send({'method': 'initialized'})
-        result = self.observer.call('thread/resume', {'threadId': self.thread_id})
+        # A long-lived rollout can take longer than ordinary RPCs to resume.
+        result = self.observer.call('thread/resume', {'threadId': self.thread_id}, timeout=120)
         if unresolved:
             self.recoverable_idle = False
             self.arbiter.lost()
@@ -528,12 +529,13 @@ class Session:
     def send(self, event):
         with self.send_lock: self.ws.send(json.dumps(event, ensure_ascii=False))
 
-    def call(self, method, params, token=None):
+    def call(self, method, params, token=None, *, timeout=15):
         self.counter += 1; key = 'arbiter-' + str(self.counter)
         ready = threading.Event(); self.waiters[key] = [ready, None]
         if token: self.pending[key] = token
         self.send({'id': key, 'method': method, 'params': params})
-        if not ready.wait(15): raise UnknownEffect('RPC timeout')
+        if not ready.wait(timeout):
+            raise UnknownEffect(f'RPC timeout: {method} after {timeout}s')
         result = self.waiters.pop(key)[1]
         if not result or 'error' in result: raise UnknownEffect('RPC rejected/disconnected')
         return result['result']

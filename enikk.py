@@ -648,7 +648,8 @@ def submission_proxy(endpoint, session_id, python):
                 '--trigger', str(root / 'trigger.sock'), '--ready', str(ready)],
                 stdin=subprocess.DEVNULL, stdout=log, stderr=log, close_fds=True, start_new_session=True)
             try:
-                deadline = time.monotonic() + 15
+                # Allow initialize (15s), resume (120s), and journal/startup overhead.
+                deadline = time.monotonic() + 180
                 while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
                     time.sleep(.05)
                 if not ready.exists() or process.poll() is not None:
