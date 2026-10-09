@@ -21,6 +21,35 @@ from trigger_transport import accept_websocket, connect, peer_uid, rpc_object
 FIXTURE = '파일이나 코드를 변경하지 말고 다음 한 문장만 답해. 도로시 로컬 트리거 전달 확인 완료.\n\nEOF\n'
 SUBMITS = {'turn/start', 'turn/steer', 'review/start', 'thread/shellCommand', 'thread/compact/start'}
 
+class ContinuityBlocked(Exception):
+    """Reject before forwarding, without changing the active reservation."""
+
+def continuity_error(event, exc):
+    # This proxy does not expose thread/revert. Reject before any forwarding or
+    # state change. Codex treats method-unavailable as a definite non-mutation;
+    # generic server failures correctly trigger its uncertain-history shutdown.
+    code = -32601 if event.get('method') == 'thread/revert' else -32010
+    return {'code': code, 'message': 'ENIKK_CONTINUITY_BLOCKED: 세션 보호를 위해 차단했어. ' + str(exc)}
+
+
+BLOCKED_CONTINUITY_METHODS = frozenset({
+    'thread/start', 'thread/fork', 'thread/archive', 'thread/delete',
+    'thread/revert', 'thread/inject_items', 'account/logout',
+})
+
+
+def check_continuity_request(event, thread_id):
+    method = event.get('method', '')
+    params = event.get('params') or {}
+    if not isinstance(params, dict):
+        raise ContinuityBlocked('invalid request parameters')
+    if method in BLOCKED_CONTINUITY_METHODS:
+        raise ContinuityBlocked(method)
+    if method == 'thread/resume':
+        if params.get('threadId') != thread_id or any(params.get(k) is not None for k in ('history', 'path')):
+            raise ContinuityBlocked('resume must use the original thread ID without replacement history')
+
+
 # Explicit allow-list for work that may proceed through commit -> main -> push ->
 # user-prefix production update without asking for another USER approval. Add new
 # exceptions here one by one; anything not matching this list keeps the default
@@ -229,6 +258,7 @@ class Service:
             pass
 
     def native_request(self, session, event):
+        check_continuity_request(event, self.thread_id)
         method = event.get('method')
         params = event.get('params') or {}
         if not isinstance(params, dict): raise ValueError('invalid params')
@@ -596,6 +626,9 @@ def native_client(service, sock):
             raw = downstream.recv(); event = rpc_object(raw)
             try:
                 service.native_request(session, event)
+            except ContinuityBlocked as exc:
+                downstream.send(json.dumps({'id': event.get('id'), 'error': continuity_error(event, exc)}))
+                continue
             except (Busy, UnknownEffect) as exc:
                 downstream.send(json.dumps({'id': event.get('id'), 'error': {'code': -32001, 'message': 'Enikk submission busy/unknown: ' + str(exc)}}))
                 continue
