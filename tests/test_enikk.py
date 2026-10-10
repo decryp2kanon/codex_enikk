@@ -129,7 +129,7 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
         self.assertEqual(json.loads((self.base / 'args.json').read_text()), ['resume', 'example-session', '--dangerously-bypass-approvals-and-sandbox', '--no-daemon', '-c', 'notify=[]'])
         self.assertEqual(len(list((self.enikk_data / 'backups').glob('*.tar.gz'))), 2)
         self.assertIn('hello', (self.enikk_data / 'transcripts/codex-session-example-session-part-000001.txt').read_text())
-        self.assertIn('Name: Enikk (에닉), exactly E-N-I-K-K.', (self.data / 'AGENTS.md').read_text())
+        self.assertFalse((self.data / 'AGENTS.md').exists())
 
     def test_guarded_restart_missing_pin_or_modified_source_never_launches(self):
         self.assertEqual(self.run_cli().returncode, 0)
@@ -165,6 +165,7 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
         self.assertEqual(journal.read_bytes(), original)
 
     def test_guard_cli_audit_and_search_do_not_launch_or_rewrite_instructions(self):
+        (self.data / 'AGENTS.md').write_text('# Existing user instructions\n')
         self.assertEqual(self.run_cli(prompt='유키짱').returncode, 0)
         capture = self.base / 'args.json'
         capture.unlink()
@@ -177,18 +178,13 @@ sys.exit(int(os.environ["FAKE_STATUS"]))
         self.assertFalse(capture.exists())
         self.assertEqual((self.data / 'AGENTS.md').read_bytes(), instructions)
 
-    def test_identity_is_short_idempotent_and_preserves_global_instructions(self):
+    def test_startup_preserves_global_instructions_without_adding_identity(self):
         agents = self.data / 'AGENTS.md'
         agents.write_text('# Existing\nKeep this.\n')
-        first = enikk.ensure_identity()
-        original = first.read_bytes()
-        self.assertIn('# Existing\nKeep this.', first.read_text())
-        self.assertIn('Goddess of Victory: NIKKE', first.read_text())
-        self.assertIn('never Anik, Enik, EnikkK', first.read_text())
-        self.assertLess(len(enikk.IDENTITY.encode()), 400)
-        self.assertEqual(enikk.ensure_identity(), first)
-        self.assertEqual(first.read_bytes(), original)
-        self.assertEqual(first.stat().st_mode & 0o777, 0o600)
+        original = agents.read_bytes()
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(agents.read_bytes(), original)
 
     def test_resume_alias_and_exit_code(self):
         result = self.run_cli('--resume', status=7)

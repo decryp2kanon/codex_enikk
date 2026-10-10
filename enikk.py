@@ -38,12 +38,6 @@ def supported_codex_version(output):
 LATEST_TRANSCRIPT_FILE = None
 TRANSCRIPT_PART_BYTES = 10_000_000
 INSTANCE_SOCKET_PREFIX = '\0codex_enikk.instance.'
-IDENTITY_START = '<!-- codex-enikk:identity:start -->'
-IDENTITY_END = '<!-- codex-enikk:identity:end -->'
-IDENTITY = '''# Identity
-Name: Enikk (에닉), exactly E-N-I-K-K.
-Origin: The user named this Codex assistant after Enikk from Goddess of Victory: NIKKE, as part of their NIKKE-based names for Codex AIs.
-When addressed as "에닉" or "Enikk", understand it refers to you. Always spell it "Enikk", never Anik, Enik, EnikkK, or another variant.'''
 ANSI = re.compile(r'\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]')
 HELP = '''codex_enikk — 기존 대화를 원래 Codex 화면으로 이어가기
 
@@ -120,34 +114,6 @@ def private_dir(path):
     if path.is_symlink() or not path.is_dir():
         raise OSError(f'일반 디렉터리가 아닙니다: {path}')
     path.chmod(0o700)
-
-
-def ensure_identity():
-    """Keep a small global Codex identity block without replacing user instructions."""
-    destination = codex_home() / 'AGENTS.md'
-    if destination.is_symlink():
-        raise OSError(f'전역 지침 파일이 심볼릭 링크입니다: {destination}')
-    old = destination.read_text(encoding='utf-8') if destination.exists() else ''
-    block = f'{IDENTITY_START}\n{IDENTITY}\n{IDENTITY_END}'
-    if IDENTITY_START in old or IDENTITY_END in old:
-        if old.count(IDENTITY_START) != 1 or old.count(IDENTITY_END) != 1:
-            raise ValueError('Codex Enikk identity 블록이 손상되었습니다.')
-        start = old.index(IDENTITY_START)
-        end = old.index(IDENTITY_END, start) + len(IDENTITY_END)
-        updated = old[:start] + block + old[end:]
-    else:
-        updated = old.rstrip() + ('\n\n' if old.strip() else '') + block + '\n'
-    if updated == old:
-        return destination
-    fd, temporary = tempfile.mkstemp(prefix='.agents-', dir=codex_home())
-    try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
-            stream.write(updated)
-        os.chmod(temporary, 0o600)
-        os.replace(temporary, destination)
-    finally:
-        Path(temporary).unlink(missing_ok=True)
-    return destination
 
 
 def backup():
@@ -815,7 +781,6 @@ def main(args=None):
         return 127
     with single_instance() as guard:
         private_dir(codex_home())
-        ensure_identity()
         # Keep one process per Codex home, including first-time session binding.
         with (codex_home() / 'enikk-continuity.lock').open('a') as lock:
             try:
