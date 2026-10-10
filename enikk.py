@@ -794,10 +794,12 @@ def conversation(session_id, instance_fd, args=()):
     private_dir(core_state)
     if tts_debug:
         print('음성 상태와 로그: enikk_tts status / journalctl --user -u enikk-tts', file=sys.stderr)
+    log_dir = Path.home() / 'Enikk-logs'
+    private_dir(log_dir)
     # Core owns the server, mirror and trigger even when TTS is not installed.
     with terminal_restore() as restore_terminal, owned_processes(), Mirror(
             codex_home() / 'thread_history_1.sqlite', session_id,
-            Path.home() / 'codex-latest.txt', core_state / 'mirror-thread.json'):
+            log_dir / 'codex-latest.txt', core_state / 'mirror-thread.json'):
         with app_server() as upstream, submission_proxy(upstream, session_id, sys.executable) as endpoint:
             if endpoint:
                 command = ['codex', 'resume', session_id, '--remote', endpoint, *options]

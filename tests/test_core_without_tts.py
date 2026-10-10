@@ -95,5 +95,6 @@ class InstalledCoreTests(unittest.TestCase):
             selection=json.loads((root/'state/codex_enikk/core/mirror-thread.json').read_text())
             self.assertEqual(selection['thread'],'thread')
             self.assertFalse((root/'state/enikk_tts').exists())
-            self.assertIn('mirror without voice',(home/'codex-latest.txt').read_text())
+            self.assertFalse((home/'codex-latest.txt').exists())
+            self.assertIn('mirror without voice',(home/'Enikk-logs/codex-latest.txt').read_text())
             self.assertTrue(list((root/'evidence').rglob('checkpoint.json')))
