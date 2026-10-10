@@ -17,7 +17,7 @@ class FunctionWordsTests(unittest.TestCase):
                 self.assertEqual(tn.normalize(raw), expected)
 
     def test_source_immutable(self):
-        source = Path.home() / 'git' / 'codex_enikk-education' / '8_tts-function-words-100.txt'
+        source = Path.home() / 'work-archive' / 'enikk-experiments' / 'codex_enikk-education' / '8_tts-function-words-100.txt'
         if not source.exists():
             self.skipTest('external education corpus unavailable')
         self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), FIXTURE['_source_sha256'])

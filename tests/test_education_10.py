@@ -53,7 +53,7 @@ class CodexTermsTests(unittest.TestCase):
             self.assertEqual(tn.normalize(raw),raw)
 
     def test_source_immutable(self):
-        p=Path.home() / 'git' / 'codex_enikk-education' / '10_tts-codex-terms-100.txt'
+        p=Path.home() / 'work-archive' / 'enikk-experiments' / 'codex_enikk-education' / '10_tts-codex-terms-100.txt'
         if not p.exists():self.skipTest('external source absent')
         self.assertEqual(hashlib.sha256(p.read_bytes()).hexdigest(),FIXTURE['_source_sha256'])
         self.assertEqual(p.read_text().splitlines(),[x[0] for x in FIXTURE['cases']])
