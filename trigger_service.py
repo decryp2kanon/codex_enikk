@@ -4,6 +4,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import socket
@@ -35,16 +36,101 @@ def continuity_error(event, exc):
 BLOCKED_CONTINUITY_METHODS = frozenset({
     'thread/start', 'thread/fork', 'thread/archive', 'thread/delete',
     'thread/revert', 'thread/inject_items', 'account/logout',
+    'memory/reset', 'thread/memoryMode/set',
+    'thread/realtime/start', 'thread/realtime/appendAudio',
+    'thread/realtime/appendText', 'thread/realtime/appendSpeech',
+    'externalAgentConfig/import', 'externalAgentConfig/import/recordHistory',
+    'plugin/install', 'plugin/uninstall', 'plugin/share/checkout',
+    'plugin/reconcile', 'marketplace/add', 'marketplace/remove',
+    'skills/extraRoots/set', 'thread/approveGuardianDeniedAction',
 })
 
 
-def check_continuity_request(event, thread_id):
+# Stock codex-cli 0.160.0 expands /init before sending it as a normal turn.
+# Exact whole-message matching does not intercept ordinary discussion of AGENTS.md.
+INIT_PROMPT_SHA256 = 'b1f4f6bba488110435f76970e2be3095209f32cf767f7a438b54eab76163d51a'
+PROTECTED_CONFIG_PARTS = frozenset({
+    'personality', 'memories', 'memory', 'features', 'hooks', 'plugins',
+    'agents', 'instructions', 'developer_instructions', 'base_instructions',
+    'model_instructions_file', 'experimental_instructions_file',
+    'approvals_reviewer', 'bypass_hook_trust', 'profile', 'profiles',
+})
+
+
+def protected_config_path(path):
+    # Config RPC key paths are TOML dotted keys. Treat quoted components
+    # conservatively, including writes to a parent table containing protected keys.
+    if not isinstance(path, str) or not path.strip():
+        return True
+    if not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9-]*(?:\.[A-Za-z_][A-Za-z_0-9-]*)*', path):
+        return True  # Do not let TOML quoting/escape aliases bypass the guard.
+    return bool(set(path.split('.')) & PROTECTED_CONFIG_PARTS)
+
+
+def protected_config_value(value):
+    if isinstance(value, dict):
+        return any(protected_config_path(k) or protected_config_value(v) for k, v in value.items())
+    if isinstance(value, list):
+        return any(protected_config_value(v) for v in value)
+    return False
+
+
+def check_config_edit(edit):
+    if not isinstance(edit, dict) or protected_config_path(edit.get('keyPath')) or protected_config_value(edit.get('value')):
+        raise ContinuityBlocked('protected configuration change')
+
+
+def check_session_overrides(overrides):
+    if not isinstance(overrides, dict):
+        raise ContinuityBlocked('invalid session configuration override')
+    if protected_config_value(overrides):
+        # config/read is not the resumed thread's settings. Do not use it to
+        # authorize even a seemingly equal personality/features override.
+        raise ContinuityBlocked('protected overrides are unsupported; omit them to preserve saved settings')
+
+
+def check_continuity_request(event, thread_id, baseline=None):
+    baseline = baseline or {}
     method = event.get('method', '')
     params = event.get('params') or {}
     if not isinstance(params, dict):
         raise ContinuityBlocked('invalid request parameters')
     if method in BLOCKED_CONTINUITY_METHODS:
         raise ContinuityBlocked(method)
+    if method == 'config/value/write':
+        check_config_edit(params)
+    if method == 'config/batchWrite':
+        edits = params.get('edits')
+        if not isinstance(edits, list):
+            raise ContinuityBlocked('invalid configuration edits')
+        for edit in edits:
+            check_config_edit(edit)
+    if method in SUBMITS | {'turn/interrupt', 'thread/read', 'thread/turns/list', 'thread/items/list', 'thread/realtime/stop', 'thread/settings/update', 'turn/settings/update'}:
+        if params.get('threadId') != thread_id:
+            raise ContinuityBlocked('only the original thread may be opened')
+    if method == 'thread/settings/update' and params.get('disabledPluginIds') is not None:
+        raise ContinuityBlocked('thread plugin configuration change')
+    if method in ('thread/resume', 'turn/start', 'thread/settings/update'):
+        if params.get('personality') is not None:
+            raise ContinuityBlocked('personality override')
+        if any(params.get(key) is not None for key in ('baseInstructions', 'developerInstructions')):
+            raise ContinuityBlocked('instruction override')
+        mode = params.get('collaborationMode')
+        if mode is not None:
+            if not isinstance(mode, dict) or not isinstance(mode.get('settings'), dict):
+                raise ContinuityBlocked('invalid collaboration settings')
+            instructions = mode['settings'].get('developer_instructions')
+            if instructions is not None and instructions != baseline.get('_saved_collaboration_instructions'):
+                raise ContinuityBlocked('custom collaboration instruction override')
+        overrides = params.get('config')
+        if overrides is not None:
+            check_session_overrides(overrides)
+    if method in ('turn/start', 'turn/steer'):
+        for item in params.get('input') or []:
+            if isinstance(item, dict) and item.get('type') == 'text':
+                text = item.get('text')
+                if isinstance(text, str) and hashlib.sha256(text.strip().encode()).hexdigest() == INIT_PROMPT_SHA256:
+                    raise ContinuityBlocked('/init instruction-file generation')
     if method == 'thread/resume':
         if params.get('threadId') != thread_id or any(params.get(k) is not None for k in ('history', 'path')):
             raise ContinuityBlocked('resume must use the original thread ID without replacement history')
@@ -181,6 +267,7 @@ class Service:
         self.queue_wakeup = threading.Event()
         self.dispatcher = None
         self.voice = VoicePublisher(thread_id)
+        self.continuity_baseline = {}
 
     def _validate_task_record(self, record):
         state = json.loads(record.read_text())
@@ -230,13 +317,17 @@ class Service:
         self.observer.send({'method': 'initialized'})
         # A long-lived rollout can take longer than ordinary RPCs to resume.
         result = self.observer.call('thread/resume', {'threadId': self.thread_id}, timeout=120)
+        if result.get('thread', {}).get('id') != self.thread_id:
+            raise UnknownEffect('thread identity mismatch')
+        # Only the resume result belongs to this thread. File-level config/read
+        # must never authorize changes to settings persisted with a thread.
+        self.continuity_baseline = {'_saved_collaboration_instructions':
+            ((result.get('collaborationMode') or {}).get('settings') or {}).get('developer_instructions')}
         if unresolved:
             self.recoverable_idle = False
             self.arbiter.lost()
         else:
             thread = result['thread']
-            if thread.get('id') != self.thread_id:
-                raise UnknownEffect('thread identity mismatch')
             if thread.get('status', {}).get('type') == 'idle':
                 self.arbiter.initialize(thread)
             else:
@@ -258,7 +349,7 @@ class Service:
             pass
 
     def native_request(self, session, event):
-        check_continuity_request(event, self.thread_id)
+        check_continuity_request(event, self.thread_id, self.continuity_baseline)
         method = event.get('method')
         params = event.get('params') or {}
         if not isinstance(params, dict): raise ValueError('invalid params')

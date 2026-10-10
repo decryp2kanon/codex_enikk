@@ -764,7 +764,12 @@ def conversation(session_id, instance_fd, args=()):
         with app_server() as upstream, submission_proxy(upstream, session_id, sys.executable) as endpoint:
             if endpoint:
                 command = ['codex', 'resume', session_id, '--remote', endpoint, *options]
-            child = subprocess.Popen(command, close_fds=True)
+            previous_suspend = signal.signal(signal.SIGTSTP, signal.SIG_IGN)
+            try:
+                child = subprocess.Popen(command, close_fds=True)
+            except BaseException:
+                signal.signal(signal.SIGTSTP, previous_suspend)
+                raise
             try:
                 while True:
                     try:
@@ -773,6 +778,7 @@ def conversation(session_id, instance_fd, args=()):
                     except KeyboardInterrupt:
                         continue
             finally:
+                signal.signal(signal.SIGTSTP, previous_suspend)
                 if child.poll() is not None:
                     child.wait()
                     restore_terminal()

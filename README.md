@@ -291,3 +291,22 @@ codex_enikk --history-search '유키짱' --direct-user-only
 별도 장치의 백업이 필요하다. 이 패치는 최초 보호 실행 이전의 기록 변경을
 소급해서 탐지하지 않는다. CODEX_HOME을 다른 경로로 옮겨 복구한 경우 새 보호
 범위가 되므로 원래 ID와 원문을 기존 백업과 먼저 대조해야 한다.
+
+
+### Fixed-session command guard (Codex 0.160.0)
+
+The native request proxy rejects destructive thread operations, protected memory/
+instruction/configuration changes, realtime voice starts, and selected plugin
+mutations before forwarding. Same-session normal conversation, model/plan,
+interrupt and exit remain available. Ctrl+Z no longer suspends the wrapper/TUI.
+
+Use the verified default `codex_enikk` invocation. Explicit personality, features,
+protected config and direct instruction overrides (including custom terminal
+visualization instructions) are unsupported and are rejected even if they appear
+unchanged. The guard does not rewrite those arguments or infer saved thread
+settings from config files. Menus may still be visible; this is request protection,
+not a custom UI. Existing prompt-edit screen limitations remain.
+
+See [remaining-command-guard-report.md](remaining-command-guard-report.md) for
+scope, tests, recovery and limitations. Updating the files does not restart Enikk;
+the user must restart normally to activate the new guard.

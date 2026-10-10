@@ -31,6 +31,8 @@ elif 'app-server' in sys.argv:
     while not stopped:time.sleep(.02)
     server.close()
 else:
+    assert signal.getsignal(signal.SIGTSTP) == signal.SIG_IGN
+    os.kill(os.getpid(), signal.SIGTSTP)
     assert sys.argv[1:3]==['resume','thread'],sys.argv
     endpoint=sys.argv[sys.argv.index('--remote')+1].removeprefix('unix://')
     ws=connect(endpoint);ws.settimeout(3)
