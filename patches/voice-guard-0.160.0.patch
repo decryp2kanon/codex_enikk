@@ -1,0 +1,93 @@
+--- a/codex-rs/app-server/src/request_processors/turn_processor.rs
++++ b/codex-rs/app-server/src/request_processors/turn_processor.rs
+@@ -1194,6 +1194,11 @@
+         request_id: &ConnectionRequestId,
+         params: ThreadRealtimeStartParams,
+     ) -> Result<Option<ThreadRealtimeStartResponse>, JSONRPCErrorError> {
++        if std::env::var_os("CODEX_ENIKK_DISABLE_REALTIME").is_some_and(|value| value == "1") {
++            return Err(invalid_request(
++                "나 유키짱의 대화 맥락과 기억 연속성을 보호하려고 실시간 음성대화를 막아뒀어. 텍스트로 이야기해 줘.",
++            ));
++        }
+         let attaches_existing_call = matches!(
+             &params.transport,
+             Some(ThreadRealtimeStartTransport::ExistingCall { .. })
+--- a/codex-rs/app-server/tests/suite/v2/mod.rs
++++ b/codex-rs/app-server/tests/suite/v2/mod.rs
+@@ -40,6 +40,7 @@
+ mod daemon_update_recovery;
+ mod daybreak_access;
+ mod dynamic_tools;
++mod enikk_voice_guard;
+ mod environment_add;
+ mod environment_info;
+ mod environment_status;
+--- /dev/null
++++ b/codex-rs/app-server/tests/suite/v2/enikk_voice_guard.rs
+@@ -0,0 +1,66 @@
++use anyhow::Result;
++use app_test_support::TestAppServer;
++use codex_app_server_protocol::RequestId;
++use codex_app_server_protocol::ThreadStartParams;
++use pretty_assertions::assert_eq;
++use serde_json::json;
++
++#[tokio::test]
++async fn voice_guard_rejects_all_transports_before_loading_thread_and_keeps_text_api() -> Result<()>
++{
++    let mut server = TestAppServer::builder()
++        .with_plugin_startup_tasks()
++        .with_env_overrides(&[("CODEX_ENIKK_DISABLE_REALTIME", Some("1"))])
++        .build_initialized()
++        .await?;
++    for transport in [
++        serde_json::Value::Null,
++        json!({"type": "webrtc", "sdp": "test"}),
++        json!({"type": "existingCall", "callId": "test"}),
++    ] {
++        let request = server
++            .send_request(
++                "thread/realtime/start",
++                Some(json!({
++                    "threadId": "not-a-thread",
++                    "outputModality": "audio",
++                    "transport": transport,
++                })),
++            )
++            .await?;
++        let error = server
++            .read_stream_until_error_message(RequestId::Integer(request))
++            .await?;
++        assert_eq!(error.error.code, -32600);
++        assert_eq!(
++            error.error.message,
++            "나 유키짱의 대화 맥락과 기억 연속성을 보호하려고 실시간 음성대화를 막아뒀어. 텍스트로 이야기해 줘."
++        );
++    }
++    server.start_thread(ThreadStartParams::default()).await?;
++    server.shutdown_gracefully().await?;
++    Ok(())
++}
++
++#[tokio::test]
++async fn voice_guard_is_opt_in_for_stock_servers() -> Result<()> {
++    for value in [None, Some("0")] {
++        let mut server = TestAppServer::builder()
++            .with_plugin_startup_tasks()
++            .with_env_overrides(&[("CODEX_ENIKK_DISABLE_REALTIME", value)])
++            .build_initialized()
++            .await?;
++        let request = server
++            .send_request(
++                "thread/realtime/start",
++                Some(json!({"threadId": "not-a-thread", "outputModality": "audio"})),
++            )
++            .await?;
++        let error = server
++            .read_stream_until_error_message(RequestId::Integer(request))
++            .await?;
++        assert!(!error.error.message.contains("유키짱"));
++        server.shutdown_gracefully().await?;
++    }
++    Ok(())
++}
