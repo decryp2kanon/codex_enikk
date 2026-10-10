@@ -2,14 +2,14 @@
 
 ## 범위와 입력 무결성
 
-- Source: `/home/ak/satoshi.md`; Part 2는 `## 1. 사라진 개발자`를 포함하고 `## 2. 첫 번째 경고` 직전에서 끝난다.
+- Source: `~/satoshi.md`; Part 2는 `## 1. 사라진 개발자`를 포함하고 `## 2. 첫 번째 경고` 직전에서 끝난다.
 - Source SHA-256: `6734fe26f929fcc5a7b679499a2c6efadaa434027c11dee7a692725810f6d25d` (작업 전후 동일).
 - Part: 1,232 Unicode characters, 17 lines; SHA-256 `66940598e729dd2d42d755ce0578bc28a494f74416b6d134479d5e167af29336`.
 - 다른 Part의 본문은 음성 입력에 포함하지 않았다.
 
 ## 작업 환경
 
-- Feature worktree: `/home/ak/git/codex_enikk-satoshi-part02`.
+- Feature worktree: `~/git/codex_enikk-satoshi-part02`.
 - Branch: `fix/yuki-satoshi-part02-20261005`; 시작 HEAD `15b0b2d839c998006247bd002dfe79a76c792f51` (당시 최신 `main`).
 - Feature implementation commit: `6b909289ec9b40679d42bd6db878b5643b617764`.
 - Running production worker was kept alive; no restart was performed. Playback path retained its configured 1.25x tempo.
@@ -54,7 +54,7 @@
 - Code/test changes are limited to `tts/yuki-text-normalization-overrides.py` and `tests/test_text_normalization.py`.
 - Implementation commit: `6b909289ec9b40679d42bd6db878b5643b617764`; branch report commit merged with it: `53e66c602d29b929d5c5e9f399f0e8165e36df47`.
 - Main fast-forward and `origin/main` push succeeded at `53e66c602d29b929d5c5e9f399f0e8165e36df47`.
-- `PREFIX=/home/ak/.local CODEX_ENIKK_INSTALL_TTS=0 bash ./update.sh`: exit 0. Source/install SHA-256 matched for overrides (`0aac81ba2b0c47e27efad080020997fae7af7eef8f41a96e768fec55886fc72a`), normalization wrapper (`e4c8eb944a32261a242d51db6fb87285e519aed02199de6419b214eba0dbc835`), and Chatterbox engine (`53fc54cac8d8f20fe7a1bd84656ada4e76d4acc1c618efa624723e3bcf4f053e`).
+- `PREFIX=~/.local CODEX_ENIKK_INSTALL_TTS=0 bash ./update.sh`: exit 0. Source/install SHA-256 matched for overrides (`0aac81ba2b0c47e27efad080020997fae7af7eef8f41a96e768fec55886fc72a`), normalization wrapper (`e4c8eb944a32261a242d51db6fb87285e519aed02199de6419b214eba0dbc835`), and Chatterbox engine (`53fc54cac8d8f20fe7a1bd84656ada4e76d4acc1c618efa624723e3bcf4f053e`).
 - Rollback: use a normal `git revert` of the implementation commit if the post-restart graduation reveals an unwanted transformation; no runtime or model setting changed.
 - Four primary-checkout benchmark reports remain untouched.
 

@@ -144,9 +144,9 @@ class EducationTests(unittest.TestCase):
                              '--{0}=main', '`{0}`', '{0}(x)', '{0}2']:
                 raw = template.format(word)
                 self.assertEqual(tn.normalize(raw), raw)
-        for raw in ['https://example.com/?path=/home/ak/git/sugarchain/src',
+        for raw in ['https://example.com/?path=/home/test-user/git/sugarchain/src',
                     'https://example.com/?path=~/.bitcoin/blocks',
-                    'user@example.com/home/ak/git/sugarchain/src']:
+                    'user@example.com/home/test-user/git/sugarchain/src']:
             self.assertEqual(tn.overrides.normalize_paths(raw), (raw, []))
 
     def test_bounds_and_path_machine_identifier(self):

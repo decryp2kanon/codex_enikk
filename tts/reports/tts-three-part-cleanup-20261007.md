@@ -39,7 +39,7 @@ The candidate exceeds the +2% preservation gate. Absolute changes are small CPU 
 
 No new full-input, hash, UUID or education-row mappings were introduced. Registered lexical and filename components are shared policy. Existing legacy callback phrase guards and approved one-hour/branch coordinating-particle policies remain; this is not a claim that all historical exception code was removed. Physical onset and the historical missing-recording root cause remain unmeasured/unproven.
 
-Raw evidence: /home/ak/.local/state/codex_enikk/tts-three-part-cleanup-20261007
+Raw evidence: ~/.local/state/codex_enikk/tts-three-part-cleanup-20261007
 
 The changes are left uncommitted for review and further simplification. Existing production is preserved.
 

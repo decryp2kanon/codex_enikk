@@ -6,7 +6,7 @@
 
 현재 production이 units100 교육 코드를 포함하는 것을 확인한 뒤, 원본 100줄을 순서대로 한 번씩 production TTS에 제출했어. normalization은 사용자 확정값 기준 100/100 exact였고, 실제 재생 성공은 75/100이야.
 
-- 입력: `/home/ak/git/codex_enikk-education/1_tts-units-100.txt` — 100 lines, 850 bytes, SHA-256 `c30773e80b6c48fe92afc49c88637d850842a0743c7772c539b2b1f1c91d16d2`
+- 입력: `~/git/codex_enikk-education/1_tts-units-100.txt` — 100 lines, 850 bytes, SHA-256 `c30773e80b6c48fe92afc49c88637d850842a0743c7772c539b2b1f1c91d16d2`
 - Production normalization accuracy: **100/100** (A: 0/100, +100 percentage points)
 - Delivery: **75 PLAYED / 25 FAILED_EXPLICITLY**, success 75.00% (A: 54/46, +21 percentage points; failed items -45.65%)
 - Run ID: `6b55260418c0460e9b543def1c2a9a48`; benchmark item namespace: `units100-prod-edu-073cf8b3c0d8`
@@ -18,7 +18,7 @@
 - Active release manifest의 normalizer SHA-256: `311806fe33dad99f02da12e32a993946491ff2cade38fd594493c7a9cdcf29a5`, override SHA-256: `771dfa5702b31b8284773e0ff976818af3ff86a2646551659e73a5f3fd80e400`, Chatterbox engine SHA-256: `4784bf5fd6ea57da05b65a23490773761aafd6c887845eae99daca4a9ae5df9a`.
 - 활성 release, engine 및 normalization hash는 benchmark 전후 동일했고, benchmark 동안 production code/config 수정이나 restart는 없었어.
 - Benchmark 시작 전에 대기열은 비어 있었어. 제출은 `100` source lines, 각각 1회; 마지막 playback 완료 후 unrelated 메시지는 측정 구간 밖이었어.
-- Model: Chatterbox; reference: `/home/ak/Apps/chatterbox-yuki/yuki_super-clean.wav`; playback path: 1.25x pitch-preserving; GPU detail은 수집하지 않았어.
+- Model: Chatterbox; reference: `~/Apps/chatterbox-yuki/yuki_super-clean.wav`; playback path: 1.25x pitch-preserving; GPU detail은 수집하지 않았어.
 - Start: 2026-10-06T18:21:38 (first source submit monotonic `618352.216915`); last source submit monotonic `618354.251990`.
 - Last benchmark playback completion: 2026-10-06T18:26:19 (monotonic `618633.681027`).
 

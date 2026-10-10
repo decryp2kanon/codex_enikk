@@ -4,7 +4,7 @@
 
 상태: **완료 (정규화 A + 실제 production TTS A)**
 
-- benchmark corpus: `/home/ak/git/codex_enikk-education/1_tts-units-100.txt`
+- benchmark corpus: `~/git/codex_enikk-education/1_tts-units-100.txt`
 - source lines/chars/bytes: 100/845/850
 - source SHA-256: `c30773e80b6c48fe92afc49c88637d850842a0743c7772c539b2b1f1c91d16d2`
 - repository main commit: `a26223203bc12851e60d8c834965069f8d47e38c`
@@ -14,7 +14,7 @@
 - custom override SHA-256: `c5c064283888e1a1fc161bafec4cfe17a1a0498b962196e906281aa7d4aa13cb`
 - TTS engine SHA-256: `4784bf5fd6ea57da05b65a23490773761aafd6c887845eae99daca4a9ae5df9a`
 - TTS service PID: `3825938`; engine PID: `3884921`; Enikk PID: `3873587`; trigger PID: `3873752`
-- thread ID: `01a0dc7e-bc10-74f3-9324-e0d4474c2f65`; model: Chatterbox; reference: `/home/ak/Apps/chatterbox-yuki/yuki_super-clean.wav`; playback speed: `1.25x`
+- thread ID: `<redacted-session-id>`; model: Chatterbox; reference: `~/Apps/chatterbox-yuki/yuki_super-clean.wav`; playback speed: `1.25x`
 - upstream backend: production normalizer is custom-only; NeMo process absent in the production run snapshot
 - GPU/device detail: not captured for this benchmark
 
@@ -156,7 +156,7 @@ Active production normalizer, 10 whole-corpus warm-up passes followed by 30 time
 - Successful RTF generation/audio: min/median/p95/max/mean = 0.751/1.191/3.295/3.574/1.511.
 - Inter-playback gaps excluding initial idle: n/median/p95/max/mean = 53/2.287/13.010/19.796/3.721s; >1s=31, >2s=28, >5s=14.
 - Preprocessing latency n/median/p95/max/mean=100/0.000122/0.000214/0.000273/0.000138s.
-- Run ID `2ec53324179043d9a594d76842472514`; source item `units100-benchmark`; all 100 receipts persisted under `/home/ak/.local/state/enikk_tts/runs/run-2ec53324179043d9a594d76842472514/jobs`; raw WAV was not copied to the repository.
+- Run ID `2ec53324179043d9a594d76842472514`; source item `units100-benchmark`; all 100 receipts persisted under `~/.local/state/enikk_tts/runs/run-2ec53324179043d9a594d76842472514/jobs`; raw WAV was not copied to the repository.
 
 ## TTS failure analysis
 

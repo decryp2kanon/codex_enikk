@@ -16,7 +16,7 @@
 
 ## 2. 작업 범위
 
-작업 repository는 `/home/ak/git/codex_enikk` 하나만 사용한다. 별도 worktree나 복제 작업 폴더는 만들지 않는다.
+작업 repository는 `~/git/codex_enikk` 하나만 사용한다. 별도 worktree나 복제 작업 폴더는 만들지 않는다.
 
 다음 후보를 계측 결과에 따라 우선순위를 정해 하나씩 시험한다.
 
@@ -105,7 +105,7 @@ commit 4acb675fbe30fe1f99e0e4c1a6b4ea45ba62d29f completed
 
 ### 장문
 
-`/home/ak/tts-text-for-bench.md`
+`~/tts-text-for-bench.md`
 
 장문 파일이 없으면 임의로 다른 파일을 대신 사용하지 않는다. 실행 전 고정 장문을 준비하고 A/B 모두 같은 원문을 사용한다.
 
@@ -163,7 +163,7 @@ baseline 분석에서 확인한 병목 하나를 선택한다. 변경 이유와 
 
 ```bash
 enikk_tts stop
-enikk_tts update /home/ak/git/codex_enikk
+enikk_tts update "$HOME/git/codex_enikk"
 enikk_tts start
 enikk_tts status
 ```

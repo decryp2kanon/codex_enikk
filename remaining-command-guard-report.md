@@ -77,12 +77,12 @@ Only enikk.py and trigger_service.py are changed in the managed installation.
 No running Enikk process is stopped or restarted. USER_RESTART_REQUIRED: the
 running Python services do not reload these changes automatically.
 
-Backup: /home/ak/.local/state/codex_enikk/backups/remaining-command-guard-20261010T003117Z
+Backup: ~/.local/state/codex_enikk/backups/remaining-command-guard-20261010T003117Z
 The backup manifest includes old file hashes and existing runtime start times.
 To restore the prior two files on disk (does not restart anything):
 
 ```bash
-python3 /home/ak/.local/state/codex_enikk/backups/remaining-command-guard-20261010T003117Z/restore.py
+python3 ~/.local/state/codex_enikk/backups/remaining-command-guard-20261010T003117Z/restore.py
 ```
 
 The user controls normal shutdown/restart. Source commit/push and installation

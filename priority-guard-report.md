@@ -40,7 +40,7 @@ mock의 PROBE_OK는 모델 호출이 아니며 실제 모델 응답 성공을 �
 
 ## 설치 결과
 11개 UI 경로의 사전 거부/화면 생존/같은-ID 후속 mock 응답 확인.
-원본 백업: /home/ak/.local/state/codex_enikk/backups/priority-guard-20261009T212319Z
+원본 백업: ~/.local/state/codex_enikk/backups/priority-guard-20261009T212319Z
 설치 trigger_service.py SHA256: 24adc36abf2f5f0a6b243c26d9856e0e613495ca8b78a8adb28a2bd85461805f
 최초 설치 시 main 작업 파일에도 동일 변경을 보존했고 커밋/머지/푸시는 하지 않았다.
 최초 설치 직후에는 실행 중인 프로세스가 구 코드여서 재시작 전 보호가 비활성이었다.
@@ -54,6 +54,6 @@ TUI의 해당 proxy 연결, 기존 pinned session ID 유지 여부를 읽기 전
 커밋 범위는 trigger_service.py, tests/test_continuity_command_guard.py, 이 문서뿐이다.
 미검증 Rust UI 후보, 개인 기억/정체성 지침, 기타 TTS 작업은 포함하지 않는다.
 이 커밋 작업은 추가 배포 또는 재시작을 수행하지 않는다.
-UI 실험 원본 결과는 /home/ak/git/codex_enikk-priority-guard/.experiment/case-*/ 에 보존돼 있다.
+UI 실험 원본 결과는 ~/git/codex_enikk-priority-guard/.experiment/case-*/ 에 보존돼 있다.
 
 EOF

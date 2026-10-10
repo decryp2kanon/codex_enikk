@@ -12,8 +12,8 @@
 - Runtime code revision used for the final production restart: `a22c39016a9e1f818a43e3a5a0e9e8f77d7b10d8`
 - `main == origin/main` at restart time.
 - Production update command completed successfully:
-  `PREFIX=/home/ak/.local CODEX_ENIKK_INSTALL_TTS=0 bash update.sh`
-- Rollback snapshot: `/home/ak/.local/lib/codex_enikk/previous-FNCsf4Eg`
+  `PREFIX=~/.local CODEX_ENIKK_INSTALL_TTS=0 bash update.sh`
+- Rollback snapshot: `~/.local/lib/codex_enikk/previous-FNCsf4Eg`
 
 ## Production restart verification
 

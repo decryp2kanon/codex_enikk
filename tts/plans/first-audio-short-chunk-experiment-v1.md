@@ -27,7 +27,7 @@
 
 ## 3. 허용 범위와 금지 사항
 
-작업은 `/home/ak/git/codex_enikk` 하나에서 수행한다. 별도 worktree나 별도 repository 복사본을 만들지 않는다. 진단 WAV와 측정 자료는 기존 사용자 상태 디렉터리에 보존할 수 있다.
+작업은 `~/git/codex_enikk` 하나에서 수행한다. 별도 worktree나 별도 repository 복사본을 만들지 않는다. 진단 WAV와 측정 자료는 기존 사용자 상태 디렉터리에 보존할 수 있다.
 
 수정 범위는 첫 생성 청크의 분할 정책으로 제한한다. 기존 나머지 청크 정책은 가능한 한 그대로 유지하며, 첫 청크의 나머지 텍스트를 중복 없이 다음 청크에 전달한다.
 
@@ -81,7 +81,7 @@ Enikk/Codex core, enikk.py, codex app-server, codex resume, trigger_service를 �
 2. 해시 포함: `commit 4acb675fbe30fe1f99e0e4c1a6b4ea45ba62d29f completed`
 3. 실제 길고 복합적인 문장: 실행 전 미학습 혼합 문장 1개를 확정하고 A/B에서 동일하게 사용한다.
 
-장문은 `/home/ak/tts-text-for-bench.md`를 사용한다. 파일 hash를 기록하며 실험 중 입력을 바꾸지 않는다. 공격적 첫 분할이 실제 적용되는 장문 입력도 별도로 1개 확보한다. 기존 장문의 첫 청크가 변경되지 않는다면 그 결과는 일반 회귀 확인으로만 해석한다.
+장문은 `~/tts-text-for-bench.md`를 사용한다. 파일 hash를 기록하며 실험 중 입력을 바꾸지 않는다. 공격적 첫 분할이 실제 적용되는 장문 입력도 별도로 1개 확보한다. 기존 장문의 첫 청크가 변경되지 않는다면 그 결과는 일반 회귀 확인으로만 해석한다.
 
 동일 reference, 모델/샘플링, tempo, GPU, audio device, 제출 경로, idle window, timer, recording 조건을 유지한다. chunking은 이번 후보 변수이므로 변경을 허용하지만 정확한 전후 분할 목록을 기록한다.
 
@@ -172,9 +172,9 @@ monitor는 제출 전에 연결하고 다른 소리의 개입을 확인한다. �
 정적/회귀 검증을 통과한 후보만 TTS에 임시 적용한다.
 
 ```bash
-cd /home/ak/git/codex_enikk &&
+cd ~/git/codex_enikk &&
 enikk_tts stop &&
-enikk_tts update /home/ak/git/codex_enikk &&
+enikk_tts update "$HOME/git/codex_enikk" &&
 enikk_tts start &&
 enikk_tts status
 ```

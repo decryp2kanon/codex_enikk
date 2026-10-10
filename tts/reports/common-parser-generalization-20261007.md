@@ -90,8 +90,8 @@ Core, resume and trigger PIDs/start times are unchanged; no kill/restart occurre
 
 ## Artifacts
 
-Raw states/results/source snapshot/CPU script/audio interruption/events/monitor WAVs: `/home/ak/.local/state/codex_enikk/common-parser-20261007/`. CPU: `cpu-results.json`. Audio: `A-korean-1.json` through `A-korean-4.json`; `A-korean-interruption.json`. Start/end: `start.json`, `end.json`.
+Raw states/results/source snapshot/CPU script/audio interruption/events/monitor WAVs: `~/.local/state/codex_enikk/common-parser-20261007/`. CPU: `cpu-results.json`. Audio: `A-korean-1.json` through `A-korean-4.json`; `A-korean-interruption.json`. Start/end: `start.json`, `end.json`.
 
 ## Subsequent USER authorization
 
-After reviewing the code/test improvements and the unconfirmed First Audio result, USER instructed: “좋아졌음 일단 커밋 푸시 머지 적용해”. This authorizes committing/pushing this tested candidate and applying TTS without claiming the incomplete audio gate passed. The initial INCONCLUSIVE evidence above remains unchanged. Main currently equals origin/main; the candidate will be committed directly on main. The stable release 42e361a8c90f4bab is preserved for rollback. Deployment results are recorded separately in /home/ak/.local/state/codex_enikk/common-parser-20261007/deployment.json.
+After reviewing the code/test improvements and the unconfirmed First Audio result, USER instructed: “좋아졌음 일단 커밋 푸시 머지 적용해”. This authorizes committing/pushing this tested candidate and applying TTS without claiming the incomplete audio gate passed. The initial INCONCLUSIVE evidence above remains unchanged. Main currently equals origin/main; the candidate will be committed directly on main. The stable release 42e361a8c90f4bab is preserved for rollback. Deployment results are recorded separately in ~/.local/state/codex_enikk/common-parser-20261007/deployment.json.

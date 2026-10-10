@@ -1,7 +1,7 @@
 # satoshi.md TTS Training Report — Part 01/12
 
 ## 범위
-- Source: `/home/ak/satoshi.md`
+- Source: `~/satoshi.md`
 - Part: 인트로
 - 범위: 파일 시작부터 `## 1. 사라진 개발자` 직전까지
 

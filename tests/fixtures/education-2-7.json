@@ -2020,83 +2020,83 @@
   ],
   "7": [
     [
-      "/home/ak/git/sugarchain/src",
+      "/home/test-user/git/sugarchain/src",
       "루트 디렉터리 아래 홈 아래 에이케이 아래 깃 아래 슈가체인 아래 에스알씨 디렉터리 경로"
     ],
     [
-      "/home/ak/git/sugarchain/src/qt",
+      "/home/test-user/git/sugarchain/src/qt",
       "루트 디렉터리 아래 홈 아래 에이케이 아래 깃 아래 슈가체인 아래 에스알씨 아래 큐티 디렉터리 경로"
     ],
     [
-      "/home/ak/git/sugarchain/src/wallet",
+      "/home/test-user/git/sugarchain/src/wallet",
       "루트 디렉터리 아래 홈 아래 에이케이 아래 깃 아래 슈가체인 아래 에스알씨 아래 월렛 디렉터리 경로"
     ],
     [
-      "/home/ak/git/sugarchain/src/rpc",
+      "/home/test-user/git/sugarchain/src/rpc",
       "루트 디렉터리 아래 홈 아래 에이케이 아래 깃 아래 슈가체인 아래 에스알씨 아래 알피씨 디렉터리 경로"
     ],
     [
-      "/home/ak/git/sugarchain/src/node",
+      "/home/test-user/git/sugarchain/src/node",
       "루트 디렉터리 아래 홈 아래 에이케이 아래 깃 아래 슈가체인 아래 에스알씨 아래 노드 디렉터리 경로"
     ],
     [
-      "/home/ak/git/sugarchain/src/kernel",
+      "/home/test-user/git/sugarchain/src/kernel",
       "루트 디렉터리 아래 홈 아래 에이케이 아래 깃 아래 슈가체인 아래 에스알씨 아래 커널 디렉터리 경로"
     ],
     [
-      "/home/ak/git/sugarchain/src/consensus",
+      "/home/test-user/git/sugarchain/src/consensus",
       "루트 디렉터리 아래 홈 아래 에이케이 아래 깃 아래 슈가체인 아래 에스알씨 아래 컨센서스 디렉터리 경로"
     ],
     [
-      "/home/ak/git/sugarchain/src/script",
+      "/home/test-user/git/sugarchain/src/script",
       "루트 디렉터리 아래 홈 아래 에이케이 아래 깃 아래 슈가체인 아래 에스알씨 아래 스크립트 디렉터리 경로"
     ],
     [
-      "/home/ak/git/sugarchain/src/primitives",
+      "/home/test-user/git/sugarchain/src/primitives",
       "루트 디렉터리 아래 홈 아래 에이케이 아래 깃 아래 슈가체인 아래 에스알씨 아래 프리미티브스 디렉터리 경로"
     ],
     [
-      "/home/ak/git/sugarchain/src/policy",
+      "/home/test-user/git/sugarchain/src/policy",
       "루트 디렉터리 아래 홈 아래 에이케이 아래 깃 아래 슈가체인 아래 에스알씨 아래 폴리시 디렉터리 경로"
     ],
     [
-      "/home/ak/git/sugarchain/src/util",
+      "/home/test-user/git/sugarchain/src/util",
       "루트 디렉터리 아래 홈 아래 에이케이 아래 깃 아래 슈가체인 아래 에스알씨 아래 유틸 디렉터리 경로"
     ],
     [
-      "/home/ak/git/sugarchain/src/crypto",
+      "/home/test-user/git/sugarchain/src/crypto",
       "루트 디렉터리 아래 홈 아래 에이케이 아래 깃 아래 슈가체인 아래 에스알씨 아래 크립토 디렉터리 경로"
     ],
     [
-      "/home/ak/git/sugarchain/src/test",
+      "/home/test-user/git/sugarchain/src/test",
       "루트 디렉터리 아래 홈 아래 에이케이 아래 깃 아래 슈가체인 아래 에스알씨 아래 테스트 디렉터리 경로"
     ],
     [
-      "/home/ak/git/sugarchain/src/bench",
+      "/home/test-user/git/sugarchain/src/bench",
       "루트 디렉터리 아래 홈 아래 에이케이 아래 깃 아래 슈가체인 아래 에스알씨 아래 벤치 디렉터리 경로"
     ],
     [
-      "/home/ak/git/sugarchain/test/functional",
+      "/home/test-user/git/sugarchain/test/functional",
       "루트 디렉터리 아래 홈 아래 에이케이 아래 깃 아래 슈가체인 아래 테스트 아래 펑셔널 디렉터리 경로"
     ],
     [
-      "/home/ak/git/sugarchain/test/fuzz",
+      "/home/test-user/git/sugarchain/test/fuzz",
       "루트 디렉터리 아래 홈 아래 에이케이 아래 깃 아래 슈가체인 아래 테스트 아래 퍼즈 디렉터리 경로"
     ],
     [
-      "/home/ak/git/sugarchain/contrib/devtools",
+      "/home/test-user/git/sugarchain/contrib/devtools",
       "루트 디렉터리 아래 홈 아래 에이케이 아래 깃 아래 슈가체인 아래 컨트리브 아래 데브툴스 디렉터리 경로"
     ],
     [
-      "/home/ak/git/sugarchain/depends/packages",
+      "/home/test-user/git/sugarchain/depends/packages",
       "루트 디렉터리 아래 홈 아래 에이케이 아래 깃 아래 슈가체인 아래 디펜즈 아래 패키지스 디렉터리 경로"
     ],
     [
-      "/home/ak/.sugarchain/blocks",
+      "/home/test-user/.sugarchain/blocks",
       "루트 디렉터리 아래 홈 아래 에이케이 아래 숨김 슈가체인 아래 블록스 디렉터리 경로"
     ],
     [
-      "/home/ak/.bitcoin/blocks",
+      "/home/test-user/.bitcoin/blocks",
       "루트 디렉터리 아래 홈 아래 에이케이 아래 숨김 비트코인 아래 블록스 디렉터리 경로"
     ],
     [

@@ -77,22 +77,22 @@ Speech-only files preserve recorded PCM and reconstruct omitted inter-stream mon
 
 Current mixed input:
 ```bash
-paplay /home/ak/.local/state/codex_enikk/first-audio-short-chunk-20261007/A-mixed-submit-delay.wav
+paplay ~/.local/state/codex_enikk/first-audio-short-chunk-20261007/A-mixed-submit-delay.wav
 ```
 
 Most aggressive mixed input:
 ```bash
-paplay /home/ak/.local/state/codex_enikk/first-audio-short-chunk-20261007/C1-mixed-submit-delay.wav
+paplay ~/.local/state/codex_enikk/first-audio-short-chunk-20261007/C1-mixed-submit-delay.wav
 ```
 
 Moderately aggressive mixed input:
 ```bash
-paplay /home/ak/.local/state/codex_enikk/first-audio-short-chunk-20261007/C2-mixed-submit-delay.wav
+paplay ~/.local/state/codex_enikk/first-audio-short-chunk-20261007/C2-mixed-submit-delay.wav
 ```
 
 Final conservative candidate mixed input:
 ```bash
-paplay /home/ak/.local/state/codex_enikk/first-audio-short-chunk-20261007/C3final-mixed-submit-delay.wav
+paplay ~/.local/state/codex_enikk/first-audio-short-chunk-20261007/C3final-mixed-submit-delay.wav
 ```
 
 Actual fixed mixed input:
@@ -103,7 +103,7 @@ Actual fixed mixed input:
 
 Production restored to b9b120d6ebeb129c; state=ready, model_ready=true, playback_available=true, last_error=null. Source matches saved baseline and installed engine. main remains a41e323; no new commit/push. Enikk PID 1444, trigger PID 1632, Codex resume PID 1834 and their start times are unchanged.
 
-Evidence directory: `/home/ak/.local/state/codex_enikk/first-audio-short-chunk-20261007`
+Evidence directory: `~/.local/state/codex_enikk/first-audio-short-chunk-20261007`
 
 ## Subsequent explicit user instruction
 

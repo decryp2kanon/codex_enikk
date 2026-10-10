@@ -6,9 +6,9 @@
 
 ## 기준과 결과
 
-- corpus: `/home/ak/git/codex_enikk-education/1_tts-units-100.txt`
+- corpus: `~/git/codex_enikk-education/1_tts-units-100.txt`
 - SHA-256: `c30773e80b6c48fe92afc49c88637d850842a0743c7772c539b2b1f1c91d16d2`; 100줄, 빈 줄 0, 중복 0. 원본은 수정하지 않았다.
-- 교육 전 baseline: `/home/ak/git/codex_enikk/tts/reports/units100-before-education.md` — normalization 0/100, production TTS PLAYED 54/100, FAILED_EXPLICITLY 46/100.
+- 교육 전 baseline: `~/git/codex_enikk/tts/reports/units100-before-education.md` — normalization 0/100, production TTS PLAYED 54/100, FAILED_EXPLICITLY 46/100.
 - 최종 normalization 정확도: **100/100 exact match**. [test_units100_normalization.py](../../tests/test_units100_normalization.py)의 corpus 기대값 100개를 대상으로 확인했다.
 - 적용한 숫자 규칙: 정수 한자어 수사, 십·백·천 앞의 1 생략(백·천·천이백), 소수점은 `쩜`, 소수부는 한 자리씩 읽기.
 - 적용한 좁은 단위 사전: 이 corpus에 나온 bit/byte 대소문자, SI 단위, 주파수·전기·온도, 시간·속도, 비율·기술 카운터 표현. 한 번 컴파일하는 단일 단위 토큰 registry를 사용하고 일반 영어 사전은 추가하지 않았다.

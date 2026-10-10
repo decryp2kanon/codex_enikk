@@ -66,7 +66,7 @@ class SymbolTests(unittest.TestCase):
             self.assertEqual(tn.overrides.markdown_spoken(raw),raw)
 
     def test_source(self):
-        source=Path('/home/ak/git/codex_enikk-education/9_tts-github-symbols-100.txt')
+        source=Path.home() / 'git' / 'codex_enikk-education' / '9_tts-github-symbols-100.txt'
         if not source.exists():self.skipTest('external source absent')
         self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(),FIXTURE['_source_sha256'])
         self.assertEqual(source.read_text().splitlines(),[raw for raw,_ in FIXTURE['cases']])

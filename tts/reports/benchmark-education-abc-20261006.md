@@ -8,14 +8,14 @@ A/B 비교 보고서에 사용된 기술 문서의 동일한 production TTS benc
 
 ## 입력과 실행 조건
 
-- 입력: `/home/ak/tts-text-for-bench.md`
+- 입력: `~/tts-text-for-bench.md`
 - 원본: 9,393자, 175개 줄, SHA-256 `14825803bf1de37162d2c3544151cf99c6ac12d1da13408a4697f353637ee8dd` — 명령서에 적힌 SHA와 일치
 - 내용 범위: Bitcoin·Git/GitHub·Linux 기술 용어 각 100개, 총 300개 용어를 포함한 파일 전체
 - Core commit: `a26223203bc12851e60d8c834965069f8d47e38c`; `main`과 `origin/main` 동일
 - 현재 production 선택 release: `a492cdc27ea17847`; benchmark를 처리한 상주 service/engine은 시작 당시 실행 중이던 `b37bd7a1ad4e1f59` 경로
 - 두 release의 Chatterbox engine SHA-256은 동일(`4784bf5fd6ea57da05b65a23490773761aafd6c887845eae99daca4a9ae5df9a`), normalization override SHA-256도 동일(`c5c064283888e1a1fc161bafec4cfe17a1a0498b962196e906281aa7d4aa13cb`). 선택 release와 실행 중 release의 `tts_control.py`만 달랐다.
 - TTS service PID `3825938`, generation `65a64a83c6cd40d5a186d6fc127d9756`; engine PID `3910666`, run `b6ac5bee38dd44b58e3f6adcf1886d24`
-- Model path: Chatterbox C2. Reference: `/home/ak/Apps/chatterbox-yuki/yuki_super-clean.wav`. Playback: 1.25× tempo.
+- Model path: Chatterbox C2. Reference: `~/Apps/chatterbox-yuki/yuki_super-clean.wav`. Playback: 1.25× tempo.
 - GPU: NVIDIA GeForce GTX 1080
 - benchmark 제출 시작: 2026-10-06 16:02:33.672 KST (monotonic `610007.769256` s)
 - 첫 benchmark playback: 16:02:36.959 KST (monotonic `610010.959075` s)

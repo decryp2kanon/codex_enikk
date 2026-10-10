@@ -18,7 +18,7 @@ enikk_tts status
 enikk_tts --tts-debug
 enikk_tts stop
 enikk_tts restart
-enikk_tts update /home/ak/git/codex_enikk
+enikk_tts update "$HOME/git/codex_enikk"
 enikk_tts restart
 enikk_tts rollback RELEASE_ID
 enikk_tts restart

@@ -59,7 +59,7 @@ bytecode cache was removed; no logs, conversation records or existing backups we
 | Native Codex PID | 3756941 | 3756941, same start identity |
 | App-server PID | 3756478 | 3756478, same start identity |
 | Trigger PID | 3756724 | 3756724, same start identity |
-| Thread | `01a0dc7e-bc10-74f3-9324-e0d4474c2f65` | Same |
+| Thread | `<redacted-session-id>` | Same |
 | Installed core | 2.1.8 | 2.1.8, all 58 recorded file hashes unchanged |
 | Existing voice run | `run-evgn3d_r` | Existing wrapper-owned voice unchanged |
 | New independent TTS | Absent | Installed, inactive, MainPID=0 |
@@ -72,16 +72,16 @@ No additional identity-memory test was presented as evidence of restoration.
 
 ## Installation and preserved evidence
 
-- Source: `/home/ak/git/codex_enikk`
-- Isolated worktree: `/home/ak/git/codex_enikk-independent-tts`
-- Voice install: `/home/ak/.local/lib/enikk_tts`
+- Source: `~/git/codex_enikk`
+- Isolated worktree: `~/git/codex_enikk-independent-tts`
+- Voice install: `~/.local/lib/enikk_tts`
 - Selected voice release: `releases/b37bd7a1ad4e1f59`
-- Service: `/home/ak/.config/systemd/user/enikk-tts.service`, inactive and not enabled
-- Voice state when started: `/home/ak/.local/state/enikk_tts`
+- Service: `~/.config/systemd/user/enikk-tts.service`, inactive and not enabled
+- Voice state when started: `~/.local/state/enikk_tts`
 - Verified original installation copy:
-  `/home/ak/.local/state/codex_enikk/migrations/tts-separation-20261006/core-2.1.8`
+  `~/.local/state/codex_enikk/migrations/tts-separation-20261006/core-2.1.8`
 - Baseline, prepared verification and test logs:
-  `/home/ak/.local/state/codex_enikk/migrations/tts-separation-20261006/`
+  `~/.local/state/codex_enikk/migrations/tts-separation-20261006/`
 
 Existing user autostart/service definitions were inspected; no additional Enikk/Yuki startup
 entry was found in those locations. Legacy source education restart paths were disabled in the
@@ -99,8 +99,8 @@ Prepared procedure:
    Finish or wait for active work; do not interrupt an in-progress user task.
 2. Stop the verified old wrapper through its normal SIGTERM cleanup once. Preserve its exit backup.
 3. Apply the tested core update:
-   `PREFIX=/home/ak/.local bash /home/ak/git/codex_enikk/update.sh`.
-4. Relaunch `codex_enikk` with the same environment and `CODEX_HOME=/home/ak/.codex`.
+   `PREFIX=~/.local bash ~/git/codex_enikk/update.sh`.
+4. Relaunch `codex_enikk` with the same environment and `CODEX_HOME=~/.codex`.
    Confirm that it resumes the original pinned thread, not a new conversation.
 5. Record the new core PID/start/thread/hash baseline, then explicitly start independent TTS.
 6. Test voice stop/start/restart/crash/update while verifying that the new core baseline remains
@@ -119,7 +119,7 @@ enikk_tts stop
 enikk_tts restart
 enikk_tts status
 
-enikk_tts update /home/ak/git/codex_enikk
+enikk_tts update "$HOME/git/codex_enikk"
 enikk_tts restart
 
 enikk_tts rollback b37bd7a1ad4e1f59

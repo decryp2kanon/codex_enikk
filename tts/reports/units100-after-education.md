@@ -8,7 +8,7 @@
 
 ## 입력 및 실행 조건
 
-- 입력: `/home/ak/git/codex_enikk-education/1_tts-units-100.txt`
+- 입력: `~/git/codex_enikk-education/1_tts-units-100.txt`
 - 줄/바이트: 100줄 / 850 bytes
 - SHA-256: `c30773e80b6c48fe92afc49c88637d850842a0743c7772c539b2b1f1c91d16d2`
 - 기준 A: `tts/reports/units100-before-education.md`

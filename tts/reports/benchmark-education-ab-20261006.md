@@ -4,7 +4,7 @@
 
 - A: 교육 전 기존 기술문서 벤치마크
 - B: 교육 후 현재 production 벤치마크
-- 입력 파일: `/home/ak/tts-text-for-bench.md`
+- 입력 파일: `~/tts-text-for-bench.md`
 - 입력 크기: 9,393 Unicode characters
 - 입력 SHA-256: `14825803bf1de37162d2c3544151cf99c6ac12d1da13408a4697f353637ee8dd`
 - 전체 delivery parts: 306

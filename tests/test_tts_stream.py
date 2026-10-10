@@ -216,7 +216,7 @@ class StreamingTests(unittest.TestCase):
     def test_path_stream_keeps_visible_source_and_final_is_not_duplicated(self):
         from test_tts_delivery import definitions
         engine = definitions()
-        text = '현재 /home/ak/git/codex_enikk/tts/yuki-chatterbox-engine.py 파일을 확인할게. 숫자는 31.1이야.'
+        text = '현재 /home/test-user/git/codex_enikk/tts/yuki-chatterbox-engine.py 파일을 확인할게. 숫자는 31.1이야.'
         for character in text:
             self.delta(character)
         self.complete(text)

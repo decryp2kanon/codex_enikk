@@ -66,10 +66,10 @@ Manual voice identity, endings and natural connective pacing: PENDING. Plan sect
 
 Representatives are nearest-median runs A9 and B17. All raw recordings remain. Listening files retain PCM and insert the measured inter-chunk frame hiatus absent from paused-monitor samples; no noise trim or word editing was added to these comparison files.
 
-- Before: /home/ak/.local/state/codex_enikk/first-audio-ab-20261007/A-listen.wav
-- After: /home/ak/.local/state/codex_enikk/first-audio-ab-20261007/B-listen.wav
+- Before: ~/.local/state/codex_enikk/first-audio-ab-20261007/A-listen.wav
+- After: ~/.local/state/codex_enikk/first-audio-ab-20261007/B-listen.wav
 
-Raw data/logs/WAVs/runner: /home/ak/.local/state/codex_enikk/first-audio-ab-20261007
+Raw data/logs/WAVs/runner: ~/.local/state/codex_enikk/first-audio-ab-20261007
 
 Started 2026-10-07T16:56:36.305690+09:00; written 2026-10-07T18:23:55.329810+09:00; elapsed 87.3 minutes. No additional candidate search was started while quality verification remained pending.
 

@@ -18,7 +18,7 @@ enikk_tts start
 enikk_tts status
 enikk_tts stop
 enikk_tts restart
-enikk_tts update /home/ak/git/codex_enikk
+enikk_tts update "$HOME/git/codex_enikk"
 enikk_tts restart
 enikk_tts rollback RELEASE_ID
 enikk_tts restart
@@ -131,7 +131,7 @@ after response start and 6.432s before final completion. Median/max gaps were
 Before the existing scheduler and numeric pronunciation, clear filesystem paths
 (`~/`, `./`, `../`, `/home/`, `/tmp/`, `/usr/`, `/etc/`, `/var/`, `/opt/`) become
 basename/extension descriptions. For example,
-`/home/ak/git/codex_enikk/tts/yuki-chatterbox-engine.py` is spoken as
+`~/git/codex_enikk/tts/yuki-chatterbox-engine.py` is spoken as
 “유키 채터박스 엔진 파이썬 파일 경로”. Native TUI text and source jobs retain the
 original path. URL and general slash expressions are not filesystem matches.
 Backticks and surrounding punctuation are handled separately; an immediately

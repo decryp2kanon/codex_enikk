@@ -95,10 +95,10 @@ class PathTests(unittest.TestCase):
 
     def test_required_paths(self):
         for path, expected in {
-            '/home/ak/git/codex_enikk/tts/yuki-chatterbox-engine.py': '유키 채터박스 엔진 파이썬 파일 경로',
-            '/home/ak/git/codex_enikk/enikk.py': '에닉 파이썬 파일 경로',
-            '/home/ak/git/codex_enikk/README.md': '리드미 마크다운 파일 경로',
-            '/home/ak/git/codex_enikk/install.sh': '인스톨 셸 스크립트 경로',
+            '/home/test-user/git/codex_enikk/tts/yuki-chatterbox-engine.py': '유키 채터박스 엔진 파이썬 파일 경로',
+            '/home/test-user/git/codex_enikk/enikk.py': '에닉 파이썬 파일 경로',
+            '/home/test-user/git/codex_enikk/README.md': '리드미 마크다운 파일 경로',
+            '/home/test-user/git/codex_enikk/install.sh': '인스톨 셸 스크립트 경로',
             '/tmp/test-output.wav': '테스트 아웃풋 웨이브 오디오 파일 경로',
             '/tmp/enikk-recovery-id3zb9we/approval-marker.txt': '승인 표시 텍스트 파일 경로',
         }.items():
@@ -108,18 +108,18 @@ class PathTests(unittest.TestCase):
                 self.assertEqual(records[0]['original'], path)
 
     def test_non_paths_are_unchanged(self):
-        for text in ('https://example.com/test.py', 'https://example.com/home/ak/test.py',
+        for text in ('https://example.com/test.py', 'https://example.com/home/test-user/test.py',
                      '31.1', '3.2GB', '파일 경로를 확인할게.', '초/분', 'C2'):
             self.assertEqual(self.scope['normalize_paths'](text), (text, []))
 
     def test_markdown_punctuation_and_grammar(self):
         expected = '테스트 파이썬 파일 경로'
-        self.assertEqual(self.normalize('`/home/ak/test.py`.'), expected + '.')
-        self.assertEqual(self.normalize('(/home/ak/test.py)'), '(' + expected + ')')
-        self.assertEqual(self.normalize('/home/ak/test.py를 확인해.'), expected + '를 확인해.')
-        self.assertEqual(self.normalize('현재 `/home/ak/test.py` 파일을 확인할게.'), '현재 ' + expected + '를 확인할게.')
-        self.assertEqual(self.normalize('/home/ak/test.py 파일에서 확인해.'), expected + '에서 확인해.')
-        self.assertEqual(self.normalize('/home/ak/test.py 경로에서 확인해.'), expected + '에서 확인해.')
+        self.assertEqual(self.normalize('`/home/test-user/test.py`.'), expected + '.')
+        self.assertEqual(self.normalize('(/home/test-user/test.py)'), '(' + expected + ')')
+        self.assertEqual(self.normalize('/home/test-user/test.py를 확인해.'), expected + '를 확인해.')
+        self.assertEqual(self.normalize('현재 `/home/test-user/test.py` 파일을 확인할게.'), '현재 ' + expected + '를 확인할게.')
+        self.assertEqual(self.normalize('/home/test-user/test.py 파일에서 확인해.'), expected + '에서 확인해.')
+        self.assertEqual(self.normalize('/home/test-user/test.py 경로에서 확인해.'), expected + '에서 확인해.')
         prose = '테스트 파이썬 파일 경로 파일을 확인해.'
         self.assertEqual(self.normalize('/tmp/test.py. ' + prose), expected + '. ' + prose)
 
@@ -143,7 +143,7 @@ class PathTests(unittest.TestCase):
         self.scope['tn'].normalize.assert_called_once_with(text)
 
     def test_only_explicit_path_spans_change(self):
-        source = '알파 `/home/ak/test.py` 파일을 확인하고, 베타 /tmp/output.wav를 확인해. 감마 31.1 델타.'
+        source = '알파 `/home/test-user/test.py` 파일을 확인하고, 베타 /tmp/output.wav를 확인해. 감마 31.1 델타.'
         result, records = self.scope['normalize_paths'](source)
         reconstructed = source
         for record in reversed(records):

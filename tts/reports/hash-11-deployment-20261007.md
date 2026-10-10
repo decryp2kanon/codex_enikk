@@ -9,7 +9,7 @@ Review branch: fix/yuki-tts-hash-11-20261007.
 Main fast-forward merge 완료. origin/main 일반 push 완료. force push 없음.
 기능/회귀 테스트 171 PASS. Python syntax PASS. git diff --check PASS.
 
-TTS-only stop → update /home/ak/git/codex_enikk → start 완료.
+TTS-only stop → update ~/git/codex_enikk → start 완료.
 이전 release: 5f61d98a283358d3 (보존).
 최종 active release: d5a81f0e2e5a41ce.
 TTS service PID: 150501 → 243292.
@@ -20,7 +20,7 @@ Source/install parity: 12개 manifest 항목 PASS. generated PROTOCOL은 release
 설치 normalizer smoke: anchored short hash, standalone SHA-256, units, number, inline code 보호 PASS. 실제 음성 생성 benchmark/smoke는 추가 실행하지 않았다.
 
 Enikk core PID 1444, trigger PID 1632, Codex resume PID 1834의 PID/시작 시각 유지. core 종료/재시작 없음.
-Thread: 01a0dc7e-bc10-74f3-9324-e0d4474c2f65 유지.
+Thread: <redacted-session-id> 유지.
 
 First Audio performance gate=NOT MEASURED.
 Inter-chunk gap gate=NOT MEASURED.

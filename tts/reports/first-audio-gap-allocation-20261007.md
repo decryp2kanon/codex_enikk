@@ -27,11 +27,11 @@ Active temporary release: 7161efd1b55637e0. ready/model_ready/playback_available
 ## Listening
 Same sentence, separate files; marker beep followed by reconstructed submission wait and recorded speech:
 
-A: /home/ak/.local/state/codex_enikk/first-audio-gap-allocation-20261007/A-before-beep-delay.wav
+A: ~/.local/state/codex_enikk/first-audio-gap-allocation-20261007/A-before-beep-delay.wav
 
-B: /home/ak/.local/state/codex_enikk/first-audio-gap-allocation-20261007/B-reallocated-beep-delay.wav
+B: ~/.local/state/codex_enikk/first-audio-gap-allocation-20261007/B-reallocated-beep-delay.wav
 
-Raw measurement files reside in /home/ak/.local/state/codex_enikk/first-audio-short-chunk-20261007 with labels G0, G25, G55retry. This experiment's scripts, source snapshots, results and final state: /home/ak/.local/state/codex_enikk/first-audio-gap-allocation-20261007.
+Raw measurement files reside in ~/.local/state/codex_enikk/first-audio-short-chunk-20261007 with labels G0, G25, G55retry. This experiment's scripts, source snapshots, results and final state: ~/.local/state/codex_enikk/first-audio-gap-allocation-20261007.
 
 ## User acceptance and final application
 The user reported “좋아졌어” and then “일단 지금 밸런스 잡혔어 풀반영 하자”. This accepts the current balance despite the remaining occasional gap and unmet 25% total-completion goal. Deployment uses exactly the tested candidate; no additional tuning. The original first-short-phrase candidate alone was not accepted as the final implementation; it is combined here with remainder reallocation. Final deployment identifiers are recorded in the local application artifact after push/status checks.
