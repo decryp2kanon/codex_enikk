@@ -196,11 +196,35 @@ codex_enikk --history-search '유키짱' --direct-user-only
 
 같은 PC의 보존본은 별도 장치 백업을 대체하지 않습니다. 검사 사이의 추가 기록이 아직 복사되지 않았을 수 있고, 최초 보호 실행 이전의 변경은 소급 탐지하지 못합니다. CODEX_HOME을 옮겨 복원하면 새 보호 범위가 되므로 원래 ID와 원문을 먼저 대조해야 합니다.
 
-## 영구 백업과 두 번째 디스크
+## 백업 운영: Borg와 기존 tar.gz
+
+현재 Nana의 주기 백업은 **별도 Borg 운영 구성**을 사용합니다. 본체에 포함된 tar.gz 백업과 구분해야 합니다. Borg 도구·설정·키·타이머는 개인 운영 환경에 설치되어 있으며 이 저장소의 일반 설치만으로 재구성되지 않습니다.
+
+| 구분 | 현재 운영 상태 |
+| --- | --- |
+| Borg 주기 백업 | `enikk-borg-backup.timer`로 약 15분마다 두 독립 저장소에 저장 |
+| 저장소 | `~/Enikk-backups/borg`, `/mnt/hdd4t_2nd/Enikk-backups/borg` |
+| 기존 tar.gz 타이머 | `enikk-conversation-backup.timer` 비활성화; 이전 archive는 보존 |
+| 본체 tar.gz 백업 | 본체의 시작·종료 백업 코드는 유지 |
+| Borg 복원 도구 | 별도 설치된 `enikk-borg-restore`; 기본 복원은 새 폴더로 추출·검증 |
+
+Borg는 대화·DB·설정·설치본·소스·TTS 환경과 자산·인증 및 키 자료·발견된 외부 첨부를 포함합니다. Ubuntu 전체 이미지나 실행 중 프로세스를 저장하지는 않습니다. 중복 제거로 여러 시점의 archive를 유지하며, 현재 자동 삭제는 하지 않습니다. 두 번째 디스크가 없으면 홈 저장만 완료하고 오류를 보고하므로 마지막 성공 상태를 확인해야 합니다.
+
+저장소는 암호화되어 있습니다. 각 `borg-recovery/`의 `passphrase`는 평문 비밀이고 `repository-key`는 암호화된 내보낸 키입니다. 복구 키트도 비공개로 보관하고 저장소와 키·암호를 공개 Git에 올리지 마세요.
+
+```bash
+systemctl --user status enikk-borg-backup.timer
+journalctl --user -u enikk-borg-backup.service -n 20 --no-pager
+enikk-borg-restore list
+```
+
+파일 추출·해시·JSONL·SQLite 검증은 완료했지만 **복원본의 실제 온라인 대화 재개 시험은 보류**했습니다. 운영 세션을 복원 시험에 사용하지 않습니다. 파일 복원 성공과 실제 실행·대화 연속성 확인은 별개입니다. 개인 복원 절차는 `~/Enikk-backups/borg-recovery/RESTORE.md`를 참고하세요. `codex_enikk_restore`는 Borg가 아닌 기존 tar.gz용입니다.
+
+### 본체의 기존 tar.gz 백업과 두 번째 디스크
 
 기본 백업 위치는 **`~/Enikk-backups/backups/`**입니다. `CODEX_ENIKK_DATA_DIR`를 명시하고 별도 primary 설정이 없으면 호환성을 위해 해당 폴더의 `backups/`를 사용합니다.
 
-Nana에서 현재 설정한 두 위치는 다음과 같습니다.
+본체의 기존 tar.gz 구성에 설정된 두 위치는 다음과 같습니다.
 
 | 구분 | 위치 |
 | --- | --- |
@@ -221,7 +245,7 @@ Nana에서 현재 설정한 두 위치는 다음과 같습니다.
 
 JSON 예시의 `/home/YOUR_USER`는 실제 홈 디렉터리의 절대 경로로 바꾸세요. JSON 설정은 `$HOME`, `$USER` 같은 셸 변수를 자동 확장하지 않습니다. 다른 시스템에서는 실제 홈·마운트 경로를 사용해야 합니다. 두 번째 위치를 지정하려면 `secondary_mount`도 설정하고 실제 별도 디스크가 마운트된 상태인지 확인하세요. 설정 파일과 타이머는 일반 설치가 자동 생성하지 않습니다.
 
-- 본체 시작 전과 정상 종료 시 날짜별 `.tar.gz`를 생성합니다. Nana에서는 별도 타이머가 실행 중에도 약 15분마다 백업합니다.
+- 본체 시작 전과 정상 종료 시 날짜별 `.tar.gz`를 생성합니다. 이전 tar.gz 주기 타이머는 현재 비활성화되어 있으며, 주기 백업은 위 Borg 구성에서 수행합니다.
 - 원본과 두 번째 복사본의 SHA256을 비교하고, 임시 파일·fsync·원자적 게시를 사용합니다. 기존 백업을 덮어쓰거나 자동 삭제하지 않습니다.
 - 별도 디스크가 마운트되지 않았으면 오류를 알리고 홈의 완료된 백업은 보존합니다.
 - 홈 경로가 Git 저장소 아래라면 백업 폴더를 Git에서 제외해야 합니다. 대화 백업을 저장소에 커밋하지 마세요.
@@ -235,7 +259,7 @@ journalctl --user -u enikk-conversation-backup.service -n 20 --no-pager
 
 설정과 검증 정보: [영구 백업 보고서](permanent-backup-report.md).
 
-### 백업에 포함되는 기록
+### 기존 tar.gz 백업에 포함되는 기록
 
 `$CODEX_HOME`의 `sessions/`, `archived_sessions/` JSONL, `history.jsonl`, `session_index.jsonl`, `enikk-continuity.json`을 보관합니다. 존재하면 `state_5.sqlite`와 `thread_history_1.sqlite`도 Python SQLite backup API로 committed WAL을 포함해 스냅샷을 만듭니다.
 
@@ -245,7 +269,7 @@ manifest에는 원본 CODEX_HOME, CLI 버전, 포함 파일, SHA256, 스냅샷 �
 
 실행 중 스냅샷은 각 DB 안에서 일관되지만 여러 DB와 JSONL 전체를 한 트랜잭션으로 묶지는 않습니다. 정확한 같은 시점의 전체 백업은 모든 Codex 쓰기 작업을 종료한 상태에서 만들어야 합니다. rollout 누락이나 DB 위치 불일치가 발견되면 실패를 알립니다.
 
-### 복원
+### 기존 tar.gz 복원
 
 복원은 **Codex와 본체를 종료한 뒤 빈 CODEX_HOME**에서 수행합니다. 운영 기록을 지우고 복원을 시험하지 마세요.
 

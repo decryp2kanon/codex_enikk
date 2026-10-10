@@ -20,7 +20,7 @@ class PersistenceTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.home = self.root / 'source'
         self.home.mkdir()
-        self.environment = patch.dict(os.environ, {'CODEX_HOME':str(self.home),
+        self.environment = patch.dict(os.environ, {'HOME':str(self.root), 'CODEX_HOME':str(self.home),
             'CODEX_ENIKK_DATA_DIR':str(self.root/'data')})
         self.environment.start();self.addCleanup(self.environment.stop)
         self.rollout = self.home / 'sessions/rollout.jsonl'
