@@ -49,7 +49,7 @@ def main(argv=None):
     parser.add_argument('--fixture', action='store_true', help='only the built-in harmless status command; never reads the real inbox')
     parser.add_argument('--cancel', metavar='TASK_ID', help='cancel a queued command; never interrupts active work')
     args = parser.parse_args(argv)
-    trusted = Path.home() / 'dorothy-command.md'
+    trusted = Path.home() / '.local/state/codex_enikk/bridge/dorothy-command.md'
     if (args.cancel and (args.path or args.fixture)) or (args.path is not None and (args.fixture or args.path != str(trusted))):
         result = {'status': 'INVALID_PATH'}
     else:

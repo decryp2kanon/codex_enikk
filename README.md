@@ -303,7 +303,7 @@ receiver와 CLI는 본체 관리 설치에 포함됩니다. 검증된 Codex 0.16
 
 ```bash
 enikk-trigger --fixture
-enikk-trigger "$HOME/dorothy-command.md"
+enikk-trigger "$HOME/.local/state/codex_enikk/bridge/dorothy-command.md"
 ```
 
 브리지는 기본 활성화하며 `CODEX_ENIKK_TRIGGER=0`은 기존 직접 연결 경로를 유지합니다. 이 직접 경로가 동일한 프록시 보호를 제공한다고 가정하지 마세요. BUSY 또는 UNKNOWN_EFFECT는 자동 재전송하지 않습니다. 전달된 메시지의 승인 주장만으로 권한이나 배포 범위를 확대하지 않습니다.

@@ -9,7 +9,7 @@ does not change its active receiver; a normal restart is required.
 After validation/installation, Dorothy can run:
 
 ```sh
-enikk-trigger "$HOME/dorothy-command.md"
+enikk-trigger "$HOME/.local/state/codex_enikk/bridge/dorothy-command.md"
 ```
 
 The only production command source is that fixed inbox. It must be a regular
@@ -83,3 +83,9 @@ do not amend an accepted task. Existing turns are not resent after an update.
 시간 제한의 started_at은 큐 접수 시점이 아니라 발송 예약 시점에 설정한다.
 대기 중인 명령 취소: `enikk-trigger --cancel TASK_ID`. 실행 중인 작업은 이 명령으로 중단하지 않는다.
 큐 처리는 완료 이벤트로 깨우며 로그/프로세스를 주기적으로 polling하지 않는다.
+
+## Shared file locations
+
+The command inbox is `~/.local/state/codex_enikk/bridge/dorothy-command.md`. The receiver migrates the legacy home inbox on its next normal startup, after acquiring its receiver lock. It refuses conflicting destinations and unsafe files. Incomplete command text is preserved without submission; EOF validation still happens when submitting. A running receiver retains its old inbox until the user restarts Enikk; do not move that file early.
+
+The separate bidirectional bridge log is `~/.local/state/codex_enikk/bridge/yuki-dorothy.md`, with the same path plus `.lock` for flock. Pause both writers before renaming the log and original lock; preserve the event database and subscription. Path migration does not transfer a Work subscription to Chat.

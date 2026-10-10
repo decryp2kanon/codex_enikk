@@ -15,7 +15,7 @@ python3 handoff_command.py /path/to/new-command.md --check
 
 The writer validates the resulting file, uses atomic publication and refuses to
 overwrite an existing file by default. Only for an explicitly mutable inbox such
-as `~/dorothy-command.md`, use `--replace-inbox`. Input is UTF-8. Command content
+as `~/.local/state/codex_enikk/bridge/dorothy-command.md`, use `--replace-inbox`. Input is UTF-8. Command content
 and internal whitespace are preserved; only terminal blank lines/EOF framing are
 normalized. A final standalone EOF line is treated as the document terminator.
 

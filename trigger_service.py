@@ -247,6 +247,32 @@ def inbox_bytes(path):
     return bytes(data)
 
 
+def migrate_command_inbox():
+    """Move the legacy inbox only at receiver startup, before accepting requests."""
+    home = Path.home()
+    target = home / '.local/state/codex_enikk/bridge/dorothy-command.md'
+    private_directory(target.parent)
+    legacy = home / 'dorothy-command.md'
+    if legacy.exists() or legacy.is_symlink():
+        if target.exists() or target.is_symlink():
+            raise ValueError('Both legacy and new command inbox exist; manual review required')
+        try:
+            inbox_bytes(legacy)  # Validate owner/mode/no-symlink and a stable read.
+        except ValueError as exc:
+            # An unfinished inbox must not prevent normal TUI startup. Request
+            # submission still enforces EOF; migration never submits its content.
+            if str(exc) != 'INVALID_EOF':
+                raise
+        os.link(legacy, target, follow_symlinks=False)  # Exclusive; preserve inode.
+        legacy.unlink()
+        directory = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    return target
+
+
 class Service:
     def __init__(self, endpoint, thread_id, root, inbox):
         self.endpoint, self.thread_id, self.root, self.inbox = endpoint, thread_id, root, inbox
@@ -754,12 +780,13 @@ def main():
     for name in ('upstream', 'thread', 'root', 'proxy', 'trigger', 'ready'):
         parser.add_argument('--' + name, required=True)
     args = parser.parse_args()
-    service = Service(args.upstream, args.thread, Path(args.root), Path.home() / 'dorothy-command.md')
+    service = Service(args.upstream, args.thread, Path(args.root), Path.home() / '.local/state/codex_enikk/bridge/dorothy-command.md')
     lock = os.open(service.root / 'receiver.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     def stop(*_): service.stopped.set()
     signal.signal(signal.SIGTERM, stop); signal.signal(signal.SIGINT, stop)
     try:
+        service.inbox = migrate_command_inbox()
         service.initialize()
         core = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'codex_enikk/core'
         private_directory(core)
