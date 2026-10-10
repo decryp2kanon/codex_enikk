@@ -89,3 +89,7 @@ do not amend an accepted task. Existing turns are not resent after an update.
 The command inbox is `~/.local/state/codex_enikk/bridge/dorothy-command.md`. The receiver migrates the legacy home inbox on its next normal startup, after acquiring its receiver lock. It refuses conflicting destinations and unsafe files. Incomplete command text is preserved without submission; EOF validation still happens when submitting. A running receiver retains its old inbox until the user restarts Enikk; do not move that file early.
 
 The separate bidirectional bridge log is `~/.local/state/codex_enikk/bridge/yuki-dorothy.md`, with the same path plus `.lock` for flock. Pause both writers before renaming the log and original lock; preserve the event database and subscription. Path migration does not transfer a Work subscription to Chat.
+
+## Delegated final answer return
+
+See [delegated reply storage and limits](delegated-replies.md). Final answers from accepted delegated turns are returned to the shared log after successful completion; ordinary USER turns are excluded. This does not enable Chat event subscriptions.

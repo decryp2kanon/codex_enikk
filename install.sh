@@ -35,7 +35,7 @@ cleanup() {
     fi
 }
 trap cleanup EXIT
-for file in core_runtime.py voice_events.py enikk.py latest.py persistence.py continuity.py restore.py check_codex_compat.py handoff_command.py submission_arbiter.py trigger_transport.py trigger_service.py trigger_client.py satoshi_training_supervisor.py README.md LICENSE VERSION uninstall.sh "${commands[@]}"; do
+for file in core_runtime.py voice_events.py enikk.py latest.py delegated_reply.py persistence.py continuity.py restore.py check_codex_compat.py handoff_command.py submission_arbiter.py trigger_transport.py trigger_service.py trigger_client.py satoshi_training_supervisor.py README.md LICENSE VERSION uninstall.sh "${commands[@]}"; do
     install -m 644 -- "$source_dir/$file" "$lib/$file"
 done
 chmod 755 "$lib/uninstall.sh"

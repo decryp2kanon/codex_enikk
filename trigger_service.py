@@ -16,6 +16,7 @@ import time
 from datetime import datetime, timezone
 
 from voice_events import Publisher as VoicePublisher
+from delegated_reply import capture as capture_reply, publish as publish_reply
 from submission_arbiter import Arbiter, Busy, UnknownEffect
 from trigger_transport import accept_websocket, connect, peer_uid, rpc_object
 
@@ -287,6 +288,7 @@ class Service:
         self.completed_early = {}
         self.completed_tokens = {}
         self.current_task = None
+        self.reply_capture_failed = set()
         self.recoverable_idle = True
         self.listeners = []
         self.bound = []
@@ -401,6 +403,7 @@ class Service:
 
     def finish_turn(self, turn):
         token = self.arbiter.token
+        delegated = self.arbiter.owner == "DOROTHY"
         if not self.arbiter.completed(self.thread_id, turn.get('id')):
             return False
         self.completed_tokens[token] = turn.get('id')
@@ -413,6 +416,17 @@ class Service:
                          turn_id=turn.get('id'))
             atomic(path, state)
             self.current_task = None
+            if completed and delegated:
+                try:
+                    reply_status = ('CAPTURE_FAILED' if task.name in self.reply_capture_failed else
+                                    publish_reply(task, self.thread_id, turn['id']))
+                except (OSError, ValueError, KeyError, TypeError) as exc:
+                    reply_status = 'PUBLISH_FAILED:' + type(exc).__name__
+                self.reply_capture_failed.discard(task.name)
+                try:
+                    atomic(task / 'reply-delivery.json', {'status': reply_status})
+                except OSError:
+                    print('Delegated reply delivery receipt failed; no automatic resend', file=sys.stderr)
             if completed:
                 part = satoshi_training_part((task / 'command.md').read_text(encoding='utf-8'))
                 if part is not None:
@@ -470,6 +484,19 @@ class Service:
                         atomic(path, state)
                 elif self.arbiter.turn != turn.get('id'):
                     self.arbiter.lost()
+            elif method == 'item/completed':
+                # Only this authoritative observer and its bound DOROTHY turn.
+                if (self.current_task and self.arbiter.owner == 'DOROTHY' and
+                        self.arbiter.turn is not None and params.get('turnId') == self.arbiter.turn):
+                    try:
+                        capture_reply(self.current_task, self.thread_id, self.arbiter.turn,
+                                      params.get('item') or {})
+                    except (OSError, ValueError, KeyError, TypeError) as exc:
+                        self.reply_capture_failed.add(self.current_task.name)
+                        try:
+                            atomic(self.current_task / 'reply-error.json', {'error': type(exc).__name__})
+                        except OSError:
+                            pass
             elif method == 'turn/completed':
                 if self.arbiter.state.endswith('_RESERVED') or (self.arbiter.state == 'UNKNOWN' and self.arbiter.token is not None and self.arbiter.turn is None):
                     self.completed_early[turn.get('id')] = turn

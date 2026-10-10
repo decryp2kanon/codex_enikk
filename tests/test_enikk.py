@@ -74,6 +74,7 @@ class EnikkTests(unittest.TestCase):
         core_patch = patch.object(enikk, 'app_server', side_effect=lambda: nullcontext(None))
         core_patch.start(); self.addCleanup(core_patch.stop)
         shutil.copy2(ROOT / 'latest.py', self.app_root / 'latest.py')
+        shutil.copy2(ROOT / 'delegated_reply.py', self.app_root / 'delegated_reply.py')
         shutil.copy2(ROOT / 'persistence.py', self.app_root / 'persistence.py')
         shutil.copy2(ROOT / 'continuity.py', self.app_root / 'continuity.py')
         shutil.copy2(ROOT / 'codex_enikk', self.app_root / 'codex_enikk')
