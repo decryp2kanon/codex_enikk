@@ -98,12 +98,51 @@ def advance_epoch(thread, turn, user, ordinal=None, state=None):
         return True
 
 
+def table_row_spoken(line):
+    """Speak bounded Markdown table cells, preserving literal/code pipes."""
+    row = line.strip()
+    if not (row.startswith('|') and row.endswith('|')):
+        return line
+    cells = []
+    current = []
+    ticks = None
+    i = 1
+    while i < len(row) - 1:
+        char = row[i]
+        if char == '\\' and i + 1 < len(row) - 1:
+            current.extend(row[i:i + 2])
+            i += 2
+            continue
+        if char == '`':
+            end = i + 1
+            while end < len(row) - 1 and row[end] == '`':
+                end += 1
+            width = end - i
+            ticks = None if ticks == width else (width if ticks is None else ticks)
+            current.extend(row[i:end])
+            i = end
+            continue
+        if char == '|' and ticks is None:
+            cells.append(''.join(current).strip())
+            current = []
+        else:
+            current.append(char)
+        i += 1
+    cells.append(''.join(current).strip())
+    if len(cells) < 2:
+        return line
+    if all(re.fullmatch(r':?-+:?', cell.replace(' ', '')) for cell in cells):
+        return ''
+    return ', '.join(cell for cell in cells if cell)
+
+
 def clean_text(text):
     # Keep source immutable; structural readings are a spoken representation.
     literals = {}
     if _symbol_custom is not None and MACHINE_CLEANUP_HINT.search(text):
         text, literals = _symbol_custom.mask_machine_literals(
             text, inline_commands_only=True, hide_fences=True)
+    text = "\n".join(table_row_spoken(line) for line in text.splitlines())
     if _symbol_custom is not None:
         text = _symbol_custom.markdown_spoken(text)
     text = re.sub(r"```[\s\S]*?```", " ", text)

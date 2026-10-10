@@ -186,3 +186,7 @@ rates, compact ranges and numeric fractions. Range separators and decimal dots
 may carry Markdown escapes. Numeric PR/issue references require an adjacent
 reference label. These are full-token grammars, not full-sentence exceptions;
 URL, code, path and assignment tokens remain outside them.
+
+## Markdown table speech
+
+Bounded pipe-table rows are spoken as comma-separated cells. Separator rows are silent. Streaming waits for the end of each table row so punctuation inside a cell cannot expose partial delimiters. Literal pipes inside inline code or escaped cell content remain intact; the source conversation and displayed Markdown are unchanged.

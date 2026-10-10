@@ -46,6 +46,7 @@ def boundaries(text, final=False):
     brackets = []
     start = 0
     i = 0
+    table_row = False
     while i < len(text):
         if (i == 0 or text[i-1] == '\n') and text[i:i+3] in ('```', '~~~'):
             marker = text[i:i+3]
@@ -56,6 +57,16 @@ def boundaries(text, final=False):
             i = end + 1
             continue
         c = text[i]
+        # A table row is one spoken unit: punctuation inside a cell must not
+        # flush a fragment before its closing delimiters arrive.
+        if i == 0 or text[i - 1] == '\n':
+            table_row = re.match(r'[ \t]*\|', text[i:]) is not None
+        if not fence and table_row:
+            if c == '\n':
+                yield i + 1
+                start = i + 1
+            i += 1
+            continue
         if not fence:
             if c == '`':
                 inline = not inline
