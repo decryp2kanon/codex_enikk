@@ -86,8 +86,71 @@ def validate_storage_dir(path):
     return path
 
 
+def validate_backup_dir(value):
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        raise ValueError('백업 위치는 절대 경로여야 합니다.')
+    path = path.resolve()
+    for parent in (path, *path.parents):
+        if (parent / '.git').exists():
+            ignored = subprocess.run(['git', '-C', str(parent), 'check-ignore', '-q', '--no-index', str(path)],
+                                     capture_output=True)
+            if ignored.returncode != 0:
+                raise ValueError(f'백업 폴더가 Git에서 제외되지 않았습니다: {path}')
+    return path
+
+
+def backup_settings():
+    config = Path.home() / '.config' / 'codex_enikk' / 'backup.json'
+    return json.loads(config.read_text(encoding='utf-8')) if config.exists() else {}
+
+
 def backup_dir():
-    return data_dir() / 'backups'
+    configured = backup_settings().get('primary')
+    if configured:
+        return validate_backup_dir(configured)
+    if 'CODEX_ENIKK_DATA_DIR' in os.environ:
+        return data_dir() / 'backups'
+    return Path.home() / 'Enikk-backups' / 'backups'
+
+
+def mirror_backup(source):
+    settings = backup_settings()
+    if not settings.get('secondary'):
+        return
+    mount = Path(settings['secondary_mount'])
+    if not mount.is_mount():
+        raise OSError(f'백업 디스크가 마운트되지 않았습니다: {mount}')
+    target = validate_backup_dir(settings['secondary'])
+    private_dir(target)
+    destination = target / source.name
+    fd, temporary = tempfile.mkstemp(prefix='.incomplete-', dir=target)
+    try:
+        digest = hashlib.sha256()
+        with source.open('rb') as reader, os.fdopen(fd, 'wb') as writer:
+            while chunk := reader.read(1024 * 1024):
+                writer.write(chunk)
+                digest.update(chunk)
+            writer.flush()
+            os.fsync(writer.fileno())
+        with Path(temporary).open('rb') as reader:
+            check = hashlib.file_digest(reader, 'sha256').hexdigest() if hasattr(hashlib, 'file_digest') else None
+            if check is None:
+                hashed = hashlib.sha256()
+                while chunk := reader.read(1024 * 1024):
+                    hashed.update(chunk)
+                check = hashed.hexdigest()
+        if check != digest.hexdigest():
+            raise OSError('두 번째 백업의 SHA256 검증에 실패했습니다.')
+        os.link(temporary, destination)
+        directory_fd = os.open(target, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    print(f'두 번째 디스크 백업: {destination}', flush=True)
 
 
 def transcript_dir():
@@ -185,7 +248,15 @@ def backup():
             os.close(fd)
         Path(temporary).unlink(missing_ok=True)
         raise
+    with result.open('rb') as durable:
+        os.fsync(durable.fileno())
+    directory_fd = os.open(target, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
     print(f'세션 백업: {result}', flush=True)
+    mirror_backup(result)
     return result
 
 
